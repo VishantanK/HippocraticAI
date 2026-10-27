@@ -27,6 +27,7 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | P18 | Rejected expenses are ignored for split and duplicate checks (they aren't paid) | Inferred | design |
 | P19 | A Finance decision is final for that version: queued automatic re-checks don't replace it, and an edit made after review can't auto-approve (it's flagged `edited_after_review`) | Inferred | review finding |
 | P20 | If a decision job crashes, the expense is flagged `check_failed` (stored and POSTed) | Inferred | fail closed |
+| P21 | A Finance override applies only to the revision the reviewer saw: if the expense was re-decided since, or is being re-checked, it is refused (409) and the page reloads | Inferred | robustness review (stale approve) |
 | P21 | An expense dated more than **6 calendar months** before today is flagged `stale_date` (late claim or a year typo); a reject stays a reject | Confirmed | user |
 | P22 | A placeholder merchant (no letters/digits, or N/A, none, unknown, TBD, misc, various...) counts as `missing_merchant` | Confirmed | user chose "Flag both" |
 | P23 | A blank employee is flagged `missing_employee` (duplicate and split checks can't run without one) | Confirmed | user chose "Flag both" |

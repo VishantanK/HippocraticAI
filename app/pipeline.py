@@ -277,14 +277,28 @@ def record_failure(expense_id, error):
     return payload
 
 
-def human_override(expense_id, decision, note, reviewer="finance"):
-    """Finance reviewer resolves an expense. Recorded and POSTed like any decision."""
+class Stale(Exception):
+    """The expense changed after the reviewer loaded it; their decision would apply to unseen data."""
+
+
+def human_override(expense_id, decision, note, reviewer="finance", expected_revision=None):
+    """Finance reviewer resolves an expense. Recorded and POSTed like any decision.
+
+    With `expected_revision` (the latest revision the reviewer saw), the override is refused
+    if the expense has been re-decided since or is being re-checked right now.
+    """
     if decision not in ("approve", "reject"):
         raise ValueError("decision must be approve or reject")
     with expense_lock(expense_id):
         e = store.get_expense(expense_id)
         if not e:
             raise KeyError(expense_id)
+        if expected_revision is not None:
+            if e["status"] == "checking":
+                raise Stale("this expense is being checked again; decide once it finishes")
+            latest = store.latest_decision(expense_id)
+            if (latest["revision"] if latest else 0) != expected_revision:
+                raise Stale("this expense changed while you were looking; reload to see the latest")
         payload = {
             "id": expense_id, "employee": e["employee"], "decision": decision,
             "reasons": [{"rule": "human_review", "detail": note or f"Decided by {reviewer}."}],

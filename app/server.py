@@ -238,14 +238,17 @@ def answer_followup(
 class OverrideIn(BaseModel):
     decision: str
     note: str = ""
+    expected_revision: int | None = None  # the revision the reviewer saw; the UI always sends it
 
 
 @app.post("/api/expenses/{expense_id}/override")
 def override(expense_id: str, body: OverrideIn):
     try:
-        pipeline.human_override(expense_id, body.decision, body.note)
+        pipeline.human_override(expense_id, body.decision, body.note, expected_revision=body.expected_revision)
     except KeyError:
         raise HTTPException(404, "not found")
+    except pipeline.Stale as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return store.expense_detail(expense_id)

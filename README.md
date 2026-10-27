@@ -72,7 +72,8 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
 `{id, employee, decision, reasons:[{rule, detail}], question, amount (USD), category,
 category_mapped_from, client, suspected_manipulation, revision, decision_key, source, decided_by,
 policy_version, prompt_version, decided_at}`. Each re-decision (edit, answer, Finance override)
-is a new `revision`; downstream should keep the latest.
+is a new `revision`; downstream should keep the latest. A Finance override sends the
+`expected_revision` it saw and is refused (409) if the expense changed or is being re-checked.
 
 ## Storage (`app/store.py`, SQLite `expenses.db`)
 - `expenses`: current raw + normalised fields, follow-up answers, version, latest status.

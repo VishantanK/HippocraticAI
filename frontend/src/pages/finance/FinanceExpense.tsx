@@ -5,7 +5,7 @@ import { Stamp } from "../../components/Stamp";
 import { ErrorState, Loading } from "../../components/States";
 import { Timeline } from "../../components/Timeline";
 import { useToast } from "../../components/Toast";
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { amountOf, day, money, RULE_LABEL } from "../../lib/format";
 import type { ExpenseDetail } from "../../lib/types";
 import { useData } from "../../lib/useData";
@@ -155,12 +155,18 @@ function Decide({ e, onDone }: { e: ExpenseDetail; onDone: () => void }) {
   async function decide(d: "approve" | "reject") {
     setBusy(d);
     try {
-      await api.override(e.id, d, note.trim());
+      await api.override(e.id, d, note.trim(), e.decisions.at(-1)?.revision ?? 0);
       toast(d === "approve" ? "Approved and sent to payments." : "Rejected and sent to payments.");
       setNote("");
       onDone();
     } catch (err) {
-      toast((err as Error).message, "error");
+      if (err instanceof ApiError && err.status === 409) {
+        // Someone changed it after this page loaded: show the latest and keep the note.
+        toast("It changed while you were looking. The latest is shown now; check it and decide again.", "error");
+        onDone();
+      } else {
+        toast((err as Error).message, "error");
+      }
     } finally {
       setBusy(null);
     }

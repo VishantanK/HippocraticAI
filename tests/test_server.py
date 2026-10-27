@@ -170,6 +170,31 @@ def test_override_posts_human_decision():
     assert code == 400
 
 
+def test_override_refuses_stale_view():
+    """Finance decides on what they saw: if it was re-decided since, the override is refused."""
+    e = submit(dict(EXP, merchant="Notion"))
+    code, _ = call("PUT", f"/api/expenses/{e['id']}", dict(EXP, merchant="Notion", memo="team plan"))
+    assert code == 202
+    decided(e["id"], revision=2)
+    sent = len(POSTED)
+    code, res = call("POST", f"/api/expenses/{e['id']}/override",
+                     {"decision": "approve", "note": "ok", "expected_revision": 1})
+    assert code == 409 and "changed" in res["detail"]
+    assert len(POSTED) == sent and call("GET", f"/api/expenses/{e['id']}")[1]["decisions"][-1]["revision"] == 2
+    code, res = call("POST", f"/api/expenses/{e['id']}/override",
+                     {"decision": "approve", "note": "ok", "expected_revision": 2})
+    assert code == 200 and res["status"] == "approve"
+
+
+def test_override_refused_while_checking():
+    e = submit(dict(EXP, merchant="Linear"))
+    store.set_status(e["id"], "checking")
+    code, res = call("POST", f"/api/expenses/{e['id']}/override",
+                     {"decision": "reject", "note": "x", "expected_revision": 1})
+    assert code == 409 and "checked" in res["detail"]
+    store.set_status(e["id"], e["status"])
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")
