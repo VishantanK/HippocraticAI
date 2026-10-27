@@ -175,3 +175,15 @@ def test_recover_reenqueues_checking():
     store.set_status("WEB-9999", "checking")
     assert "WEB-9999" in jobs.recover()
     assert decided("WEB-9999")["status"] == "flag"
+
+
+def test_stats_and_employees():
+    code, s = call("GET", "/api/stats")
+    assert code == 200
+    assert s["total"] == sum(s["by_status"].values())
+    assert {"approve", "reject", "flag"} <= set(s["by_status"])
+    assert s["post"]["sent"] >= 1 and "dead" in s["post"]
+    assert s["open_questions"] >= 0 and isinstance(s["by_category"], list)
+    assert s["recent"] and {"expense_id", "decision", "revision", "decided_at"} <= set(s["recent"][0])
+    _, names = call("GET", "/api/employees")
+    assert "Mei Lin" in names

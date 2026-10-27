@@ -247,3 +247,43 @@ def list_expenses(source=None, employee=None):
     q += " ORDER BY e.updated_at DESC"
     with _lock:
         return [_row(r) for r in conn().execute(q, args)]
+
+
+def employees():
+    with _lock:
+        return [r[0] for r in conn().execute(
+            "SELECT DISTINCT employee FROM expenses WHERE employee IS NOT NULL AND employee != '' ORDER BY employee")]
+
+
+def stats():
+    """Aggregates for the Finance overview. Amounts are USD from the latest decision only."""
+    with _lock:
+        c = conn()
+        latest = [(r["source"], r["status"], json.loads(r["payload_json"]) if r["payload_json"] else {})
+                  for r in c.execute(
+                      "SELECT e.source, e.status, d.payload_json FROM expenses e LEFT JOIN decisions d"
+                      " ON d.expense_id=e.id AND d.revision=(SELECT MAX(revision) FROM decisions WHERE expense_id=e.id)")]
+        post = {k: 0 for k in ("pending", "sent", "failed", "dead")}
+        post.update({r[0]: r[1] for r in c.execute("SELECT post_status, COUNT(*) FROM decisions GROUP BY post_status")})
+        open_q = c.execute("SELECT COUNT(*) FROM followups WHERE status='open'").fetchone()[0]
+        answered = c.execute(
+            "SELECT COUNT(DISTINCT f.expense_id) FROM followups f JOIN expenses e ON e.id=f.expense_id"
+            " WHERE f.status='answered' AND e.status='flag'").fetchone()[0]
+        recent = [dict(r) for r in c.execute(
+            "SELECT d.expense_id, d.revision, d.decision, d.decided_by, d.decided_at, e.employee"
+            " FROM decisions d JOIN expenses e ON e.id=d.expense_id ORDER BY d.rowid DESC LIMIT 15")]
+    by_status, by_source, by_cat = {"approve": 0, "reject": 0, "flag": 0}, {}, {}
+    for source, status, p in latest:
+        by_status[status or "checking"] = by_status.get(status or "checking", 0) + 1
+        by_source[source] = by_source.get(source, 0) + 1
+        if p.get("category") and p.get("currency") == "USD" and p.get("amount") is not None:
+            row = by_cat.setdefault(p["category"], {"category": p["category"], "approve": 0.0, "reject": 0.0, "flag": 0.0})
+            if p.get("decision") in row:
+                row[p["decision"]] += p["amount"]
+    return {
+        "total": len(latest), "by_status": by_status, "by_source": by_source,
+        "manipulation": sum(1 for _, _, p in latest if p.get("suspected_manipulation")),
+        "open_questions": open_q, "answered_awaiting_review": answered, "post": post,
+        "by_category": sorted(by_cat.values(), key=lambda r: -(r["approve"] + r["reject"] + r["flag"])),
+        "recent": recent,
+    }

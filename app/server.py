@@ -122,6 +122,16 @@ def _submit(raw, external_id=None):
     return _accept(store.next_portal_id(), raw, external_id)
 
 
+@app.get("/api/stats")
+def get_stats():
+    return store.stats()
+
+
+@app.get("/api/employees")
+def get_employees():
+    return store.employees()
+
+
 @app.get("/api/expenses")
 def list_expenses(source: str | None = None, employee: str | None = None):
     return store.list_expenses(source, employee)
