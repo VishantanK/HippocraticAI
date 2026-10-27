@@ -40,6 +40,13 @@ CREATE TABLE IF NOT EXISTS decisions (
   decided_at TEXT NOT NULL,
   UNIQUE (expense_id, revision)
 );
+CREATE TABLE IF NOT EXISTS expense_versions (
+  expense_id TEXT NOT NULL REFERENCES expenses(id),
+  version INTEGER NOT NULL,
+  raw_json TEXT NOT NULL,             -- the submitted fields of that version (append-only)
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (expense_id, version)
+);
 CREATE TABLE IF NOT EXISTS idempotency (
   key TEXT PRIMARY KEY,               -- "<endpoint scope>:<client Idempotency-Key>"
   expense_ids TEXT NOT NULL,          -- JSON list: what the first request created or changed
@@ -91,6 +98,9 @@ def conn():
                 if column not in cols:
                     _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
             _conn.executescript(INDEXES)
+            # Databases from before expense_versions: record at least the current version.
+            _conn.execute("INSERT OR IGNORE INTO expense_versions (expense_id, version, raw_json, created_at)"
+                          " SELECT id, version, raw_json, updated_at FROM expenses")
             _conn.commit()
         return _conn
 
@@ -125,6 +135,11 @@ def next_portal_id():
         return f"WEB-{n + 1:04d}"
 
 
+def _record_version(c, expense_id, version, raw, ts):
+    c.execute("INSERT OR IGNORE INTO expense_versions (expense_id, version, raw_json, created_at) VALUES (?,?,?,?)",
+              (expense_id, version, json.dumps(raw), ts))
+
+
 def add_portal_expenses(rows):
     """Insert several new portal expenses in one transaction, already 'checking'.
     rows: [(raw, external_id)]. Returns their ids. On any error nothing is stored."""
@@ -138,6 +153,7 @@ def add_portal_expenses(rows):
                     "INSERT INTO expenses (id, employee, source, external_id, raw_json, version, status, created_at, updated_at)"
                     " VALUES (?,?,?,?,?,1,'checking',?,?)",
                     (eid, raw.get("employee"), "portal", external_id, json.dumps(raw), ts, ts))
+                _record_version(c, eid, 1, raw, ts)
                 ids.append(eid)
             c.commit()
         except Exception:
@@ -170,11 +186,13 @@ def upsert_expense(expense_id, raw, source, external_id=None):
                 "INSERT INTO expenses (id, employee, source, external_id, raw_json, version, created_at, updated_at)"
                 " VALUES (?,?,?,?,?,1,?,?)",
                 (expense_id, raw.get("employee"), source, external_id, json.dumps(raw), ts, ts))
+            _record_version(c, expense_id, 1, raw, ts)
             c.commit()
             return 1
         version = existing["version"] + (json.loads(existing["raw_json"]) != raw)
         c.execute("UPDATE expenses SET raw_json=?, employee=?, version=?, updated_at=? WHERE id=?",
                   (json.dumps(raw), raw.get("employee"), version, ts, expense_id))
+        _record_version(c, expense_id, version, raw, ts)
         c.commit()
         return version
 
@@ -344,6 +362,9 @@ def expense_detail(expense_id):
             "SELECT * FROM decisions WHERE expense_id=? ORDER BY revision", (expense_id,))]
         e["followups"] = [dict(r) for r in c.execute(
             "SELECT * FROM followups WHERE expense_id=? ORDER BY rowid", (expense_id,))]
+        e["versions"] = [_row(r) for r in c.execute(
+            "SELECT version, raw_json, created_at FROM expense_versions WHERE expense_id=? ORDER BY version",
+            (expense_id,))]
     return e
 
 

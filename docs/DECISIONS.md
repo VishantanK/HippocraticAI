@@ -8,3 +8,4 @@
 | [0004](adr/0004-no-fx-table.md) Everything is USD; any other currency symbol is flagged for the USD amount | No conversion or currency tracking to get wrong | Static FX table; currency field |
 | [0005](adr/0005-sqlite-append-only.md) SQLite with append-only decision/follow-up history | One file, full audit trail, matches what was POSTed | JSON file; in-memory store |
 | [0006](adr/0006-backstop-rules.md) Flag duplicates, amounts over $1,000, future or >6-month-old dates, typo amounts, multi-night hotels | Stop double payment and runaway uncapped approvals | Reject duplicates; no ceiling |
+| [0007](adr/0007-expense-version-history.md) Keep every submitted version of an expense (append-only) | Finance can see what changed between decisions; full audit of what was typed | Diffing extracted signals; per-edit diffs |

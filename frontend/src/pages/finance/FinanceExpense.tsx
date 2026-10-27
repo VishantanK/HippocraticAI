@@ -6,7 +6,8 @@ import { ErrorState, Loading } from "../../components/States";
 import { Timeline } from "../../components/Timeline";
 import { useToast } from "../../components/Toast";
 import { api, ApiError } from "../../lib/api";
-import { amountOf, day, money, RULE_LABEL } from "../../lib/format";
+import { changesSincePrevious } from "../../lib/changes";
+import { amountOf, day, money, RULE_LABEL, statusLabel } from "../../lib/format";
 import type { ExpenseDetail } from "../../lib/types";
 import { useData } from "../../lib/useData";
 
@@ -60,6 +61,7 @@ export default function FinanceExpense() {
               )}
             </section>
           )}
+          <WhatChanged e={e} />
           <ReadAs e={e} />
           <Checks e={e} />
         </div>
@@ -79,6 +81,46 @@ export default function FinanceExpense() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Why the decision may have flipped: edits and replies between the last two decisions. */
+function WhatChanged({ e }: { e: ExpenseDetail }) {
+  const c = changesSincePrevious(e);
+  if (!c) return null;
+  return (
+    <section className="rounded-lg border border-line bg-panel p-5 text-sm">
+      <h2 className="section-title">What changed since the previous decision</h2>
+      <p className="mt-1 text-ink-2">
+        Revision {c.before.revision} ({statusLabel(c.before.decision)}) to revision {c.after.revision} ({statusLabel(c.after.decision)}).
+      </p>
+      {c.fields.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full">
+            <thead><tr><th className="table-head w-32">Field</th><th className="table-head">Before</th><th className="table-head">After</th></tr></thead>
+            <tbody>
+              {c.fields.map((f) => (
+                <tr key={f.field}>
+                  <td className="table-cell text-muted">{f.field}</td>
+                  <td className="table-cell break-words text-ink-2 line-through decoration-muted/60">{f.from}</td>
+                  <td className="table-cell break-words font-medium">{f.to}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {c.answers.map((a, i) => (
+        <div key={i} className="mt-3 rounded bg-sunk px-3 py-2">
+          <p className="text-xs font-semibold text-muted">Employee replied</p>
+          {a.text && <p className="mt-0.5 break-words">"{a.text}"</p>}
+          {Object.entries(a.fields).filter(([k]) => k !== "receipt_file").map(([k, v]) => (
+            <p key={k} className="mt-0.5 text-ink-2">{k.replace("_", " ")}: {String(v === true ? "attached" : v)}</p>
+          ))}
+        </div>
+      ))}
+      {c.missingHistory && <p className="mt-3 text-muted">The earlier version was submitted before edit history was kept, so its fields can't be compared.</p>}
+    </section>
   );
 }
 

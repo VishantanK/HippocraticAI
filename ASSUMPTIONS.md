@@ -72,3 +72,4 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | A12 | Create, upload and answer are idempotent per `Idempotency-Key` (one key per user action, scoped to the endpoint, kept indefinitely); a request without a key behaves as before | Inferred | slice 7 |
 | A13 | An upload with any row that isn't an expense object is refused whole (400, nothing imported); content problems are still judged per expense by the pipeline | Inferred | slice 7 |
 | A14 | Unsent form input (new expense, edit, follow-up reply) is kept as a draft for that browser tab and restored on return; closing the tab with unsent input asks first | Inferred | slice 7 |
+| A15 | "What changed" compares the last two decisions only (fields of the versions they judged, replies in between); older history is in the timeline | Inferred | slice 8 |

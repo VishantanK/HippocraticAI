@@ -90,9 +90,12 @@ export interface ExpenseSummary {
   decided_by?: string | null;
 }
 
+export interface ExpenseVersion { version: number; raw: RawExpense; created_at: string }
+
 export interface ExpenseDetail extends ExpenseSummary {
   decisions: DecisionRow[];
   followups: Followup[];
+  versions: ExpenseVersion[]; // every submitted version, oldest first (append-only)
 }
 
 export interface Stats {
