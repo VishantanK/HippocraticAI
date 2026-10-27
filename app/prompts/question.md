@@ -20,4 +20,5 @@ Gap guidance:
 - high_amount_review: ask for the itemized receipt and a one-line business justification.
 - future_date: ask for the correct date.
 - possible_split: ask whether the two charges were one meal split across bills, and how many people attended / whether a client was present.
+- edited_after_review / check_failed: say Finance will review it; ask nothing unless other gaps exist.
 - llm_unavailable / guard_unavailable: say the automated check couldn't complete and Finance will review; ask nothing unless other gaps exist.

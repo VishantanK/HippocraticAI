@@ -13,6 +13,7 @@ before any cap is applied, because a cap can't be applied to it.
 """
 
 import datetime as dt
+import re
 
 from . import config
 
@@ -114,12 +115,20 @@ def _active(history, norm):
         yield other
 
 
+def merchant_key(name):
+    """'Chipotle #12 ' and 'CHIPOTLE' compare equal: letters only, store numbers dropped."""
+    return re.sub(r"[^a-z]", "", (name or "").lower())
+
+
 def detect_duplicate(norm, history):
-    """Same employee (history is per-employee), merchant, date and amount as a live expense."""
-    merchant = norm["merchant"].lower()
+    """Same employee (history is per-employee), merchant, date and ~amount (1%) as a live expense."""
+    if norm.get("amount") is None or not norm.get("date"):
+        return None
+    merchant = merchant_key(norm["merchant"])
     for other in _active(history, norm):
-        if ((other.get("merchant") or "").lower() == merchant and other["date"] == norm["date"]
-                and abs(other["amount"] - norm["amount"]) < 0.005):
+        tolerance = max(0.01, 0.01 * max(other["amount"], norm["amount"]))
+        if (merchant and merchant_key(other.get("merchant")) == merchant and other["date"] == norm["date"]
+                and abs(other["amount"] - norm["amount"]) <= tolerance):
             return _reason("possible_duplicate",
                            f"Looks like a duplicate of {other['id']} (same merchant, date and amount).")
     return None

@@ -27,8 +27,12 @@ def _utcnow():
     return dt.datetime.now(dt.timezone.utc)
 
 
-def _attempt(expense_id, revision, payload, attempts_so_far, now=None):
-    """One delivery attempt; records the outcome. Returns True if sent."""
+def _attempt(expense_id, revision, now=None):
+    """Claim the row, make one delivery attempt, record the outcome. Returns True if sent."""
+    claim = store.claim_post(expense_id, revision)
+    if claim is None:  # already sent, superseded, or another thread is sending it
+        return False
+    payload, attempts_so_far = claim["payload"], claim["attempts"]
     try:
         ok = poster.post_decision(payload)
         error = None if ok else "POST did not return 200"
@@ -48,9 +52,9 @@ def _attempt(expense_id, revision, payload, attempts_so_far, now=None):
     return ok
 
 
-def deliver(expense_id, revision, payload):
-    """First attempt, made right after the decision is stored."""
-    return _attempt(expense_id, revision, payload, 0)
+def deliver(expense_id, revision, payload=None):
+    """First attempt, made right after the decision is stored (payload is read from the row)."""
+    return _attempt(expense_id, revision)
 
 
 def run_due(now=None, ignore_backoff=False):
@@ -58,7 +62,7 @@ def run_due(now=None, ignore_backoff=False):
     now = now or _utcnow()
     sent = 0
     for row in store.due_posts(now.isoformat(timespec="seconds"), ignore_backoff=ignore_backoff):
-        sent += _attempt(row["expense_id"], row["revision"], row["payload"], row["post_attempts"], now)
+        sent += _attempt(row["expense_id"], row["revision"], now)
     return sent
 
 
@@ -80,6 +84,7 @@ def _loop():
 def start():
     global _thread
     if _thread is None or not _thread.is_alive():
+        store.reset_stale_sending()
         _stop.clear()
         _thread = threading.Thread(target=_loop, name="outbox", daemon=True)
         _thread.start()

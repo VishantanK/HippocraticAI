@@ -43,13 +43,19 @@ def _run(expense_id):
     started = time.monotonic()
     try:
         payload = pipeline.process_stored(expense_id)
-        log.info("decided %s rev %s -> %s in %.1fs", expense_id, payload["revision"],
-                 payload["decision"], time.monotonic() - started)
-    except Exception:
-        # A bug, not an LLM outage (those fail closed inside the pipeline). Surface it.
+        if payload:
+            log.info("decided %s rev %s -> %s in %.1fs", expense_id, payload["revision"],
+                     payload["decision"], time.monotonic() - started)
+    except Exception as e:
+        # A bug, not an LLM outage (those fail closed inside the pipeline): record a
+        # fail-closed flag so it is stored, POSTed and in Finance's queue.
         log.exception("decision job failed for %s", expense_id)
-        store.set_status(expense_id, "error")
-        pipeline.notify({"type": "error", "expense_id": expense_id})
+        try:
+            pipeline.record_failure(expense_id, f"{e.__class__.__name__}: {e}")
+        except Exception:
+            log.exception("could not record failure for %s", expense_id)
+            store.set_status(expense_id, "error")
+            pipeline.notify({"type": "error", "expense_id": expense_id})
     finally:
         with _guard:
             _running.discard(expense_id)
@@ -61,8 +67,8 @@ def _run(expense_id):
 
 
 def recover():
-    """Re-enqueue anything left 'checking' by a previous process (crash/restart)."""
-    ids = store.ids_with_status("checking")
+    """Re-enqueue anything left 'checking' or 'error' by a previous process (crash/restart)."""
+    ids = store.ids_with_status("checking") + store.ids_with_status("error")
     for expense_id in ids:
         enqueue(expense_id)
     return ids

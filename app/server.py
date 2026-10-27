@@ -111,9 +111,10 @@ def _raw(data):
 
 def _accept(expense_id, raw=None, external_id=None):
     """Store the change, mark it 'checking', and decide in the background (result over SSE)."""
-    if raw is not None:
-        store.upsert_expense(expense_id, _raw(raw), "portal", external_id)
-    store.set_status(expense_id, "checking")
+    with pipeline.expense_lock(expense_id):  # never interleave with a running decision
+        if raw is not None:
+            store.upsert_expense(expense_id, _raw(raw), "portal", external_id)
+        store.set_status(expense_id, "checking")
     jobs.enqueue(expense_id)
     return store.expense_detail(expense_id)
 

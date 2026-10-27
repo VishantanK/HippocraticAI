@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   decided_by TEXT NOT NULL,           -- system | human
   payload_json TEXT NOT NULL,         -- exact body POSTed to /decisions
   signals_json TEXT,                  -- guard + LLM extraction, for audit
-  post_status TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | failed | dead (see app/outbox.py)
+  post_status TEXT NOT NULL DEFAULT 'pending',  -- pending|sending|sent|failed|dead|superseded (app/outbox.py)
   post_attempts INTEGER NOT NULL DEFAULT 0,
   decided_at TEXT NOT NULL,
   UNIQUE (expense_id, revision)
@@ -169,6 +169,9 @@ def add_decision(expense_id, expense_version, payload, signals, decided_by="syst
         r = c.execute("SELECT MAX(revision) FROM decisions WHERE expense_id=?", (expense_id,)).fetchone()[0]
         revision = payload["revision"] = (r or 0) + 1
         payload["decision_key"] = f"{expense_id}:{revision}"  # idempotency key for downstream
+        # Older undelivered revisions must never arrive after this one; downstream wants the latest.
+        c.execute("UPDATE decisions SET post_status='superseded' WHERE expense_id=? AND revision<?"
+                  " AND post_status IN ('pending','failed')", (expense_id, revision))
         c.execute(
             "INSERT INTO decisions (expense_id, revision, expense_version, decision, decided_by, payload_json,"
             " signals_json, decided_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -190,6 +193,38 @@ def record_post(expense_id, revision, status, error=None, next_attempt_at=None):
             " WHERE expense_id=? AND revision=?",
             (status, error, next_attempt_at, expense_id, revision))
         conn().commit()
+
+
+def claim_post(expense_id, revision):
+    """Atomically take a deliverable row (so the inline attempt and the outbox worker never
+    both send it). Only the latest revision of an expense is deliverable. Returns
+    {"payload", "attempts"} or None if someone else has it / it's done / it's superseded."""
+    with _lock:
+        c = conn()
+        cur = c.execute(
+            "UPDATE decisions SET post_status='sending' WHERE expense_id=? AND revision=?"
+            " AND post_status IN ('pending','failed')"
+            " AND revision=(SELECT MAX(revision) FROM decisions d2 WHERE d2.expense_id=decisions.expense_id)",
+            (expense_id, revision))
+        c.commit()
+        if cur.rowcount != 1:
+            return None
+        r = c.execute("SELECT payload_json, post_attempts FROM decisions WHERE expense_id=? AND revision=?",
+                      (expense_id, revision)).fetchone()
+        return {"payload": json.loads(r["payload_json"]), "attempts": r["post_attempts"]}
+
+
+def reset_stale_sending():
+    """Rows left 'sending' by a crashed process go back to the retry queue."""
+    with _lock:
+        conn().execute("UPDATE decisions SET post_status='failed', next_attempt_at=NULL WHERE post_status='sending'")
+        conn().commit()
+
+
+def latest_decision(expense_id):
+    with _lock:
+        return _row(conn().execute(
+            "SELECT * FROM decisions WHERE expense_id=? ORDER BY revision DESC LIMIT 1", (expense_id,)).fetchone())
 
 
 def due_posts(now_iso, limit=50, ignore_backoff=False):

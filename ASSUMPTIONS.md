@@ -21,10 +21,12 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | P12 | Unknown categories are mapped by the LLM to the nearest policy category (e.g. Taxi -> GroundTransport); low confidence or no fit -> flag | Confirmed | user chose "LLM maps to nearest" |
 | P13 | Empty category is never filled in by the LLM -> flag | Inferred | notes "Missing category --> Ask" |
 | P14 | Alcohol is not separately restricted; EXP-2006 is rejected on the cap only | Inferred | open question |
-| P15 | Duplicate = same employee + merchant (case-insensitive) + date + amount as another expense that isn't rejected -> **flag** | Inferred | robustness review |
+| P15 | Duplicate = same employee + merchant (letters only, so "Chipotle #12" = "CHIPOTLE") + date + amount within 1% as another expense that isn't rejected -> **flag**. A follow-up answer can't clear it; only Finance can | Inferred | robustness review |
 | P16 | Any would-be approve over **$1,000** goes to a human (`HIGH_AMOUNT_REVIEW`); a reject stays a reject | Inferred | backstop for uncapped categories; past max approved was $410 |
 | P17 | A future-dated expense -> flag | Inferred | data validity |
 | P18 | Rejected expenses are ignored for split and duplicate checks (they aren't paid) | Inferred | design |
+| P19 | A Finance decision is final for that version: queued automatic re-checks don't replace it, and an edit made after review can't auto-approve (it's flagged `edited_after_review`) | Inferred | review finding |
+| P20 | If a decision job crashes, the expense is flagged `check_failed` (stored and POSTed) | Inferred | fail closed |
 
 ## Data
 | # | Assumption | Status | Source |
@@ -51,5 +53,5 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | A2 | Every re-evaluation POSTs a new decision with an increasing `revision`; downstream uses the latest | Inferred | design |
 | A3 | Portal submissions get server ids `WEB-####`; an uploaded id is kept as `external_id` | Inferred | avoids overwriting other expenses |
 | A4 | No auth: Employee and Finance are separate routes; the employee picks their identity in the UI | Confirmed | user chose "route split only, no auth" |
-| A5 | A failed POST is recorded (`post_status=failed`) but not retried | Inferred | 2h scope |
+| A5 | Failed POSTs are retried with backoff (8 attempts, then `dead`); only the latest revision of an expense is delivered, and older undelivered ones become `superseded` | Inferred | downstream keeps the latest revision |
 | A6 | Models: Claude `claude-haiku-5-5` for extraction/questions; `gpt-6-luna` for the guard | Confirmed | user set Haiku in config |

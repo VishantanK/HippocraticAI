@@ -21,6 +21,17 @@ def expense_lock(expense_id):
         return _locks.setdefault(expense_id, threading.RLock())
 
 
+# Expenses from the same employee are evaluated one at a time, so duplicate and split
+# checks always see each other (two identical rows in one upload can't both pass).
+# Lock order is always expense -> employee.
+_employee_locks: dict[str, threading.Lock] = {}
+
+
+def employee_lock(employee):
+    with _locks_guard:
+        return _employee_locks.setdefault((employee or "").strip().lower(), threading.Lock())
+
+
 def on_decision(fn):
     _listeners.append(fn)
 
@@ -116,6 +127,15 @@ def evaluate(raw, answers=None, history=(), use_llm=True, extract_fn=None, guard
     # 4. policy ----------------------------------------------------------------
     decision, reasons = policy.evaluate(norm, ex, history)
 
+    # A follow-up answer may correct data, but it can't talk its way out of a duplicate:
+    # the original submission is checked too, so only Finance can clear it.
+    if answers and decision == "approve":
+        original, _ = guard.check_schema(raw)
+        orig_norm = dict(normalize.normalize(original), id=raw.get("id"))
+        dup = policy.detect_duplicate(orig_norm, history)
+        if dup:
+            decision, reasons = "flag", [dup]
+
     # 5. fail closed: without full checks nothing is decided automatically ----
     if llm_error or g["guard_error"]:
         decision = "flag"
@@ -142,6 +162,8 @@ def _template_question(raw, reasons):
         "invalid_date": "confirm the date of the expense",
         "possible_split": "confirm whether these charges were one meal, how many attended, and whether a client was present",
         "possible_duplicate": "confirm whether this is a separate purchase or a duplicate of an expense you already submitted",
+        "edited_after_review": "note that Finance will review your changes",
+        "check_failed": "note that Finance will review this expense",
         "high_amount_review": "attach the itemized receipt and a short business justification for this amount",
         "future_date": "confirm the date of the expense",
     }
@@ -165,21 +187,50 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
     """Full side-effecting path: store -> evaluate -> question -> store decision -> POST -> notify."""
     expense_id = expense_id or raw.get("id")
     with expense_lock(expense_id):
-        payload = _process_locked(dict(raw, id=expense_id), source, expense_id, external_id, use_llm)
+        store.upsert_expense(expense_id, dict(raw, id=expense_id), source, external_id)
+        payload = _decide_locked(expense_id, use_llm)
     # Deliver outside the lock: a slow endpoint must not block the next edit.
-    outbox.deliver(expense_id, payload["revision"], payload)
+    outbox.deliver(expense_id, payload["revision"])
     return payload
 
 
-def _process_locked(raw, source, expense_id, external_id, use_llm, save_raw=True):
-    notify({"type": "processing", "expense_id": expense_id})
-    if save_raw:
-        store.upsert_expense(expense_id, raw, source, external_id)
-    current = store.get_expense(expense_id)
-    version = current["version"]
-    history = store.employee_history(raw.get("employee"), expense_id) if raw.get("employee") else []
+def process_stored(expense_id, use_llm=True):
+    """Re-evaluate an expense from its latest stored state (background jobs).
+    Returns None when there is nothing new to decide since Finance's decision."""
+    with expense_lock(expense_id):
+        if not store.get_expense(expense_id):
+            raise KeyError(expense_id)
+        payload = _decide_locked(expense_id, use_llm)
+    if payload:
+        outbox.deliver(expense_id, payload["revision"])
+    return payload
 
-    result = evaluate(raw, answers=current["answers"], history=history, use_llm=use_llm)
+
+def _decide_locked(expense_id, use_llm):
+    """Caller holds expense_lock. Reads the stored state once; decides on exactly that."""
+    current = store.get_expense(expense_id)
+    raw, version, source = current["raw"], current["version"], current["source"]
+    last = store.latest_decision(expense_id)
+    reviewed = last is not None and last["decided_by"] == "human"
+    if reviewed and last["expense_version"] == version:
+        # Finance already decided this exact version (e.g. a job queued before the override).
+        store.set_status(expense_id, last["decision"])
+        notify({"type": "decision", "expense_id": expense_id, "payload": last["payload"]})
+        return None
+
+    notify({"type": "processing", "expense_id": expense_id})
+    with employee_lock(raw.get("employee") or expense_id):
+        history = store.employee_history(raw.get("employee"), expense_id) if raw.get("employee") else []
+        result = evaluate(raw, answers=current["answers"], history=history, use_llm=use_llm)
+        if reviewed and result["decision"] == "approve":
+            # Edited after Finance reviewed it: a human must look again.
+            result["decision"] = "flag"
+            result["reasons"] = [{"rule": "edited_after_review",
+                                  "detail": f"Changed after Finance {last['decision']}ed it; needs another review."}]
+        return _record_locked(expense_id, raw, version, source, result, use_llm)
+
+
+def _record_locked(expense_id, raw, version, source, result, use_llm):
     question, question_source = None, None
     if result["decision"] == "flag":
         question, question_source = build_question(raw, result["reasons"], use_llm)
@@ -205,21 +256,21 @@ def _process_locked(raw, source, expense_id, external_id, use_llm, save_raw=True
         "decided_at": store.now(),
     }
     signals = dict(result["signals"], question_source=question_source)
-    revision = store.add_decision(expense_id, version, payload, signals)
+    store.add_decision(expense_id, version, payload, signals)
     store.set_normalized(expense_id, norm, result["decision"])
     notify({"type": "decision", "expense_id": expense_id, "payload": payload})
     return payload
 
 
-def process_stored(expense_id, use_llm=True):
-    """Re-evaluate an expense from its latest stored state (used by background jobs)."""
+def record_failure(expense_id, error):
+    """A job crashed (a bug, not an LLM outage): fail closed with a stored, POSTed flag."""
     with expense_lock(expense_id):
         e = store.get_expense(expense_id)
-        if not e:
-            raise KeyError(expense_id)
-        # save_raw=False: the stored raw is the source of truth; never write back a stale copy.
-        payload = _process_locked(e["raw"], e["source"], expense_id, e["external_id"], use_llm, save_raw=False)
-    outbox.deliver(expense_id, payload["revision"], payload)
+        result = {"decision": "flag", "suspected_manipulation": False, "signals": {"job_error": error},
+                  "normalized": e.get("normalized") or {},
+                  "reasons": [{"rule": "check_failed", "detail": "The automated check hit an internal error; Finance will review."}]}
+        payload = _record_locked(expense_id, e["raw"], e["version"], e["source"], result, use_llm=False)
+    outbox.deliver(expense_id, payload["revision"])
     return payload
 
 
@@ -239,6 +290,6 @@ def human_override(expense_id, decision, note, reviewer="finance"):
         }
         revision = store.add_decision(expense_id, e["version"], payload, {}, decided_by="human")
         store.set_normalized(expense_id, e.get("normalized") or {}, decision)
-    outbox.deliver(expense_id, revision, payload)
+    outbox.deliver(expense_id, revision)
     notify({"type": "decision", "expense_id": expense_id, "payload": payload})
     return payload
