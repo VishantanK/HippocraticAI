@@ -50,7 +50,7 @@ Follow-up replies are labelled `reply_to_finance_N` so the screen knows they ans
 | Route | For |
 |---|---|
 | `/employee` | My expenses; questions from Finance on top |
-| `/employee/new` | Form with validation, or JSON/CSV drag-and-drop with preview |
+| `/employee/new` | Form with validation and live policy hints (from `GET /api/policy`; guidance only), or JSON/CSV drag-and-drop with preview |
 | `/employee/expenses/:id` | Decision stamp, reply form matched to the gap, edit, history |
 | `/finance` | Decision mix, spend by category, manipulation and delivery alerts, recent decisions |
 | `/finance/queue` | Ready for your decision vs waiting on the employee |
@@ -65,7 +65,7 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
 - `eval.py`: **20/20** past decisions, **18/18** pending (gold labels in `data/expected_pending.json`),
   **99/100** on the synthetic failure-mode set (`data/mock_cases.json`, `--suite mock`),
   zero false approves (a hard assertion).
-- `pytest` (128, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
+- `pytest` (131, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
   concurrency, outbox retry/ordering/claims, async jobs, and the races found in code review.
 
 ## POSTed decision

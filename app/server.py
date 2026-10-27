@@ -135,6 +135,19 @@ def get_stats():
     return store.stats()
 
 
+@app.get("/api/policy")
+def get_policy():
+    """Policy numbers for the form's hints. Guidance only: the server decision is authoritative.
+    Approval codes are deliberately left out (publishing them would let anyone use one)."""
+    return {
+        "version": config.POLICY_VERSION, "today": config.today().isoformat(),
+        "categories": config.CATEGORIES, "meal_caps": config.MEAL_CAPS,
+        "hotel_cap": config.HOTEL_CAP, "hotel_cap_tier1": config.HOTEL_CAP_TIER1,
+        "tier1_cities": list(config.TIER1_CITIES), "receipt_threshold": config.RECEIPT_THRESHOLD,
+        "high_amount_review": config.HIGH_AMOUNT_REVIEW, "stale_months": config.STALE_MONTHS,
+    }
+
+
 @app.get("/api/employees")
 def get_employees():
     return store.employees()

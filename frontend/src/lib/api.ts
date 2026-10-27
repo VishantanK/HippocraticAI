@@ -1,4 +1,4 @@
-import type { ExpenseDetail, ExpenseInput, ExpenseSummary, Stats } from "./types";
+import type { ExpenseDetail, ExpenseInput, ExpenseSummary, Policy, Stats } from "./types";
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -37,4 +37,5 @@ export const api = {
       json("POST", { decision, note, expected_revision: expectedRevision })),
   stats: () => request<Stats>("/api/stats"),
   employees: () => request<string[]>("/api/employees"),
+  policy: () => request<Policy>("/api/policy"),
 };

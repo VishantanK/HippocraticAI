@@ -1,6 +1,10 @@
+import { Info } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { api } from "../lib/api";
 import { CATEGORIES } from "../lib/format";
+import { hintsFor } from "../lib/policyHints";
 import type { ExpenseInput, RawExpense } from "../lib/types";
+import { useData } from "../lib/useData";
 
 type Errors = Partial<Record<keyof ExpenseInput, string>>;
 
@@ -45,6 +49,9 @@ export function ExpenseForm({
   const [errors, setErrors] = useState<Errors>({});
   const set = <K extends keyof ExpenseInput>(k: K, val: ExpenseInput[K]) => setV((p) => ({ ...p, [k]: val }));
   const isSoftware = (v.category ?? "").toLowerCase() === "software";
+  // Hints are optional: if the policy can't be loaded the form works exactly as before.
+  const { data: policy } = useData(api.policy, [], () => false);
+  const hints = policy ? hintsFor(v, policy) : [];
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -96,6 +103,20 @@ export function ExpenseForm({
         <input type="checkbox" className="h-4 w-4 accent-[rgb(var(--ink))]" checked={v.receipt} onChange={(e) => set("receipt", e.target.checked)} />
         I have the receipt <span className="text-muted">(needed for anything over $25)</span>
       </label>
+      {hints.length > 0 && (
+        <section aria-live="polite" className="rounded-lg border border-line bg-sunk/50 px-4 py-3 text-sm">
+          <p className="flex items-center gap-1.5 font-semibold"><Info size={15} aria-hidden />Before you send</p>
+          <ul className="mt-2 space-y-1.5">
+            {hints.map((h) => (
+              <li key={h.key} className="flex gap-2">
+                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${h.tone === "reject" ? "bg-reject" : "bg-flag"}`} aria-hidden />
+                <span><span className="sr-only">{h.tone === "reject" ? "Likely rejected: " : "Finance will ask: "}</span>{h.text}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">A guide to the policy. The decision is made when you send, and you can still send as it is.</p>
+        </section>
+      )}
       <button className="btn-primary" type="submit" disabled={busy}>{busy ? "Sending…" : submitLabel}</button>
     </form>
   );

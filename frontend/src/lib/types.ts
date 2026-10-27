@@ -108,3 +108,17 @@ export interface Stats {
 }
 
 export type ExpenseInput = Omit<RawExpense, "receipt"> & { receipt: boolean };
+
+/** GET /api/policy: the numbers behind the form's hints (guidance; the server decides). */
+export interface Policy {
+  version: string;
+  today: string;
+  categories: string[];
+  meal_caps: Record<string, number>;
+  hotel_cap: number;
+  hotel_cap_tier1: number;
+  tier1_cities: string[];
+  receipt_threshold: number;
+  high_amount_review: number;
+  stale_months: number;
+}

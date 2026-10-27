@@ -195,6 +195,22 @@ def test_override_refused_while_checking():
     store.set_status(e["id"], e["status"])
 
 
+def test_policy_endpoint_mirrors_config():
+    """The UI's hints come from the same constants the policy engine uses; codes stay private."""
+    from app import config
+    code, p = call("GET", "/api/policy")
+    assert code == 200
+    assert p["meal_caps"] == config.MEAL_CAPS
+    assert p["hotel_cap"] == config.HOTEL_CAP and p["hotel_cap_tier1"] == config.HOTEL_CAP_TIER1
+    assert p["receipt_threshold"] == config.RECEIPT_THRESHOLD
+    assert p["high_amount_review"] == config.HIGH_AMOUNT_REVIEW
+    assert p["stale_months"] == config.STALE_MONTHS and p["today"] == config.today().isoformat()
+    assert set(p["tier1_cities"]) == set(config.TIER1_CITIES)
+    assert p["version"] == config.POLICY_VERSION
+    codes = config.load_approval_codes()
+    assert not any(str(c) in json.dumps(p) for c in codes)
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")
