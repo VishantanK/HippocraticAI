@@ -1,18 +1,15 @@
 import type { Decision, Payload, RawExpense, Status } from "./types";
 
-export function money(amount: number | null | undefined, currency?: string | null) {
-  if (amount == null) return "";
-  const cur = currency || "USD";
-  try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: cur }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${cur}`;
-  }
+const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+
+/** All amounts in the system are USD. */
+export function money(amount: number | null | undefined) {
+  return amount == null ? "" : USD.format(amount);
 }
 
-/** Prefer the parsed amount from the decision, fall back to what was typed. */
+/** Prefer the parsed USD amount from the decision; fall back to what was typed (e.g. "€65.00"). */
 export function amountOf(raw: RawExpense, p?: Payload | null) {
-  if (p && p.amount != null) return money(p.amount, p.currency);
+  if (p && p.amount != null) return money(p.amount);
   return raw.amount == null ? "" : String(raw.amount);
 }
 

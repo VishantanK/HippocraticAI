@@ -12,7 +12,7 @@ the UI over SSE. Portal work runs in background jobs.
 | Module | Responsibility |
 |---|---|
 | app/guard.py | schema/length, sanitise, manipulation screen (Decisions API -> Claude -> regex); reject vs suspect bands |
-| app/normalize.py | amount/currency/date parsing |
+| app/normalize.py | USD amount and date parsing; flags non-dollar currency symbols |
 | app/llm.py | Decisions API screen, Claude screen, extraction, question drafting |
 | app/policy.py | pure rules -> decision + reasons (caps, receipts, codes, split, duplicate, high amount, future date) |
 | app/pipeline.py | evaluate (pure) + process/process_stored (locks, store, notify) + human override + failure flag |

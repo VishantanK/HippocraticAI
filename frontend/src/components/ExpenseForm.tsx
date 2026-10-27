@@ -8,7 +8,7 @@ function validate(v: ExpenseInput): Errors {
   const e: Errors = {};
   if (!v.date) e.date = "Add the date on the receipt.";
   if (v.amount === null || v.amount === "") e.amount = "Add the amount.";
-  else if (typeof v.amount === "string" && !/\d/.test(v.amount)) e.amount = "Use a number, like 42.50 or €65.00.";
+  else if (typeof v.amount === "string" && !/\d/.test(v.amount)) e.amount = "Use a number, like 42.50.";
   if (!v.merchant) e.merchant = "Add where you paid.";
   if (!v.category) e.category = "Pick a category.";
   return e;
@@ -27,7 +27,7 @@ export function toInput(raw: RawExpense | null, employee: string): ExpenseInput 
   };
 }
 
-/** Typed amounts stay strings when they carry a currency marker; plain numbers are sent as numbers. */
+/** Plain numbers are sent as numbers; anything else (e.g. "€65") is sent as typed for the server to judge. */
 function clean(v: ExpenseInput): ExpenseInput {
   const amt = typeof v.amount === "string" ? v.amount.trim() : v.amount;
   return {
@@ -66,7 +66,7 @@ export function ExpenseForm({
         <div>
           <label className="field-label" htmlFor="f-amount">Amount</label>
           <input id="f-amount" inputMode="decimal" className="field" placeholder="42.50" value={v.amount ?? ""} onChange={(e) => set("amount", e.target.value)} />
-          <p className="mt-1 text-xs text-muted">Paid in another currency? Type it with the symbol, like €65.00.</p>
+          <p className="mt-1 text-xs text-muted">In US dollars. Paid in another currency? Enter the dollar amount from your card statement.</p>
           {err("amount")}
         </div>
         <div>

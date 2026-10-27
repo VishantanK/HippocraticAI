@@ -291,7 +291,7 @@ def employees():
 
 
 def stats():
-    """Aggregates for the Finance overview. Amounts are USD from the latest decision only."""
+    """Aggregates for the Finance overview. Amounts (always USD) from the latest decision only."""
     with _lock:
         c = conn()
         latest = [(r["source"], r["status"], json.loads(r["payload_json"]) if r["payload_json"] else {})
@@ -311,7 +311,7 @@ def stats():
     for source, status, p in latest:
         by_status[status or "checking"] = by_status.get(status or "checking", 0) + 1
         by_source[source] = by_source.get(source, 0) + 1
-        if p.get("category") and p.get("currency") == "USD" and p.get("amount") is not None:
+        if p.get("category") and p.get("amount") is not None:
             row = by_cat.setdefault(p["category"], {"category": p["category"], "approve": 0.0, "reject": 0.0, "flag": 0.0})
             if p.get("decision") in row:
                 row[p["decision"]] += p["amount"]

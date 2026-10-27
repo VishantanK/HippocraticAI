@@ -243,8 +243,7 @@ def _record_locked(expense_id, raw, version, source, result, use_llm):
         "decision": result["decision"],
         "reasons": result["reasons"],
         "question": question,
-        "amount": norm.get("amount"),
-        "currency": norm.get("currency"),
+        "amount": norm.get("amount"),  # USD; null when unreadable or not in dollars
         "category": norm.get("category"),
         "category_mapped_from": norm.get("category_mapped_from"),
         "client": norm.get("client_name") or None,

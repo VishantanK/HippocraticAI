@@ -34,7 +34,7 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
 
     category = signals.get("category")
     is_client = bool(signals.get("is_client")) and bool((signals.get("client_name") or "").strip())
-    amount, currency = norm["amount"], norm["currency"]
+    amount = norm["amount"]  # always USD (normalize returns None for other currencies)
 
     # --- data we cannot evaluate -> flag -------------------------------------
     if not norm["category_raw"]:
@@ -44,10 +44,10 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
                              f"Category {norm['category_raw']!r} does not map to a policy category."))
     if not norm["merchant"]:
         flags.append(_reason("missing_merchant", "No merchant was provided."))
-    if amount is None:
+    if norm.get("foreign_symbol"):
+        flags.append(_reason("non_usd", f"Amount {norm['amount_raw']} isn't in US dollars; a USD amount is needed."))
+    elif amount is None:
         flags.append(_reason("invalid_amount", "; ".join(norm["errors"]) or "Amount could not be read."))
-    elif currency != "USD":
-        flags.append(_reason("non_usd", f"Amount is in {currency} ({amount:.2f}); a USD amount is needed."))
     elif amount <= 0:
         flags.append(_reason("non_positive_amount", f"Amount {amount:.2f} is zero or negative."))
     if norm["date"] is None:
@@ -55,7 +55,7 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
     elif dt.date.fromisoformat(norm["date"]) > today:
         flags.append(_reason("future_date", f"Date {norm['date']} is in the future."))
 
-    can_apply_caps = amount is not None and currency == "USD" and amount > 0 and \
+    can_apply_caps = amount is not None and amount > 0 and \
         category not in (None, "unknown") and not any(f["rule"] in ("missing_category", "unknown_category") for f in flags)
 
     # --- hard rejects ---------------------------------------------------------
@@ -106,11 +106,11 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
 
 
 def _active(history, norm):
-    """Other expenses that could be paid: not this one, not rejected, USD, dated."""
+    """Other expenses that could be paid: not this one, not rejected, with a USD amount and date."""
     for other in history:
         if other.get("id") == norm.get("id") or other.get("status") == "reject":
             continue
-        if not other.get("date") or other.get("currency") != "USD" or other.get("amount") is None:
+        if not other.get("date") or other.get("amount") is None:
             continue
         yield other
 

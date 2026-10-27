@@ -67,7 +67,7 @@ export default function Overview() {
           </section>
           <section className="rounded-lg border border-line bg-panel p-5">
             <h2 className="section-title">Spend by category</h2>
-            <p className="mb-5 text-sm text-muted">USD claimed, by current decision. Foreign-currency claims appear once converted.</p>
+            <p className="mb-5 text-sm text-muted">USD claimed, by current decision. Claims not in dollars appear once the employee gives the USD amount.</p>
             <SpendByCategory rows={s.by_category} />
           </section>
         </div>

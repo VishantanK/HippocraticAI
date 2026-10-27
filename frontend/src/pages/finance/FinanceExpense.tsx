@@ -86,7 +86,7 @@ function ReadAs({ e }: { e: ExpenseDetail }) {
   const n = (e.normalized ?? {}) as Record<string, unknown>;
   const s = (v: unknown) => (v === null || v === undefined || v === "" ? "None" : String(v));
   const rows: [string, unknown, string][] = [
-    ["Amount", e.raw.amount, n.amount != null ? money(n.amount as number, n.currency as string) : "Unreadable"],
+    ["Amount", e.raw.amount, n.amount != null ? money(n.amount as number) : n.foreign_symbol ? "Not in US dollars" : "Unreadable"],
     ["Date", e.raw.date, n.date ? `${day(n.date as string)} (${n.weekday})` : "Unreadable"],
     ["Category", e.raw.category, s(n.category ?? "Unknown")],
     ["Merchant", e.raw.merchant, s(n.merchant)],

@@ -1,44 +1,39 @@
-"""Deterministic parsing of the messy raw fields (amount, currency, date)."""
+"""Deterministic parsing of the messy raw fields (amount, date).
+
+Amounts are always USD. There is no currency conversion or identification: an amount
+marked with any non-dollar currency symbol is reported so policy can flag it and ask
+the employee for the USD amount.
+"""
 
 import datetime as dt
 import re
+import unicodedata
 
-CURRENCY_SYMBOLS = {"$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "₹": "INR"}
-CURRENCY_CODES = {"USD", "EUR", "GBP", "CAD", "JPY", "INR", "AUD"}
+USD_MARKERS = re.compile(r"US\$|USD|\$", re.IGNORECASE)
 
 
 def parse_amount(raw):
-    """Return (amount: float|None, currency: str|None, error: str|None).
+    """Return (amount: float|None, foreign_symbol: str|None, error: str|None).
 
-    Plain numbers are USD. Strings may carry a symbol or ISO code.
+    Plain numbers and $/US$/USD amounts are USD. Any other currency symbol (Unicode
+    category Sc, e.g. € £ ¥ ₹ ₩) returns that symbol and no amount.
     """
     if isinstance(raw, bool):
         return None, None, "amount is not a number"
     if isinstance(raw, (int, float)):
-        return float(raw), "USD", None
+        return float(raw), None, None
     if not isinstance(raw, str) or not raw.strip():
         return None, None, "amount is missing"
 
-    s = raw.strip().upper().replace(",", "")
-    currency = None
-    for sym, code in CURRENCY_SYMBOLS.items():
-        if sym in s:
-            currency = code
-            s = s.replace(sym, "")
-    for code in CURRENCY_CODES:
-        if re.search(rf"\b{code}\b", s):
-            if currency and currency != code:
-                return None, None, "conflicting currency markers"
-            currency = code
-            s = re.sub(rf"\b{code}\b", "", s)
-    if currency is None and re.search(r"[^\d.\s-]", s):
-        return None, None, f"unrecognised currency in {raw!r}"
-    s = s.strip()
+    s = USD_MARKERS.sub("", raw)
+    foreign = next((c for c in s if unicodedata.category(c) == "Sc"), None)
+    if foreign:
+        return None, foreign, None
+    s = s.replace(",", "").strip()
     try:
-        value = float(s)
+        return float(s), None, None
     except ValueError:
-        return None, None, f"could not parse amount {raw!r}"
-    return value, currency or "USD", None
+        return None, None, f"could not read amount {raw!r}"
 
 
 def parse_date(raw):
@@ -56,7 +51,7 @@ def parse_date(raw):
 
 def normalize(expense):
     """Deterministic normalisation. Never raises; errors are collected."""
-    amount, currency, amount_err = parse_amount(expense.get("amount"))
+    amount, foreign_symbol, amount_err = parse_amount(expense.get("amount"))
     date, date_err = parse_date(expense.get("date"))
     category_raw = (expense.get("category") or "").strip()
     merchant = (expense.get("merchant") or "").strip()
@@ -64,8 +59,9 @@ def normalize(expense):
     code = code.strip().upper() if isinstance(code, str) and code.strip() else None
     receipt = expense.get("receipt")
     return {
-        "amount": amount,
-        "currency": currency,
+        "amount": amount,                 # USD, or None
+        "foreign_symbol": foreign_symbol,  # e.g. "€" when the amount isn't in dollars
+        "amount_raw": str(expense.get("amount")) if expense.get("amount") is not None else "",
         "date": date.isoformat() if date else None,
         "weekday": date.strftime("%a") if date else None,
         "is_weekend": date.weekday() >= 5 if date else None,

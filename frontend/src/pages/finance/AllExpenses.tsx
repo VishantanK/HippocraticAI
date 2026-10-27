@@ -20,7 +20,7 @@ const FILTERS = [
 type SortKey = "date" | "amount" | "employee" | "updated";
 
 const sortValue = (e: ExpenseSummary, k: SortKey): string | number => {
-  if (k === "amount") return e.latest?.currency === "USD" ? e.latest.amount ?? -1 : -1;
+  if (k === "amount") return e.latest?.amount ?? -1;
   if (k === "employee") return (e.employee ?? "").toLowerCase();
   if (k === "date") return e.raw.date ?? "";
   return e.updated_at;

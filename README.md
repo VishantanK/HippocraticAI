@@ -20,7 +20,8 @@ python mock_server.py                                  # :8000 decisions endpoin
    A manipulation screen runs on every free-text field and follow-up answer. The **OpenAI Decisions
    API** predicate (`gpt-6-luna`) rejects at p >= 0.5, the Claude screen is the fallback, and a
    4-pattern regex is the backstop. Manipulation -> **reject**.
-2. **Normalise** (`app/normalize.py`): amount/currency (no marker = USD), ISO or US dates, weekday.
+2. **Normalise** (`app/normalize.py`): amounts are always USD (any other currency symbol is flagged
+   for the employee to give the dollar amount; nothing is converted), ISO or US dates, weekday.
 3. **Extract** (`app/llm.py`, Claude, JSON schema): canonical category, named client, city.
    An exact category match overrides the model.
 4. **Policy** (`app/policy.py`, pure code; see ASSUMPTIONS.md): caps, weekend meals, Tier-1 hotels,
@@ -66,7 +67,7 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
   concurrency, outbox retry/ordering/claims, async jobs, and the races found in code review.
 
 ## POSTed decision
-`{id, employee, decision, reasons:[{rule, detail}], question, amount, currency, category,
+`{id, employee, decision, reasons:[{rule, detail}], question, amount (USD), category,
 category_mapped_from, client, suspected_manipulation, revision, decision_key, source, decided_by,
 policy_version, prompt_version, decided_at}`. Each re-decision (edit, answer, Finance override)
 is a new `revision`; downstream should keep the latest.

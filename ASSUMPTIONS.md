@@ -31,12 +31,13 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 ## Data
 | # | Assumption | Status | Source |
 |---|---|---|---|
-| D1 | An amount with no currency marker is USD | Confirmed | user |
-| D2 | Any non-USD amount -> flag and ask for the USD amount charged; no FX table | Confirmed | user |
+| D1 | All amounts are USD: plain numbers and `$`/`US$`/`USD` amounts. No currency identification or conversion anywhere | Confirmed | user |
+| D2 | An amount with any other currency symbol (€ £ ¥ ₹ ₩…, detected generically) -> flag `non_usd`, asking for the USD amount charged. Text like "65 EUR" is unreadable -> flag `invalid_amount` | Confirmed | user |
 | D3 | Dates are ISO or US MM/DD/YYYY | Inferred | data |
 | D4 | `receipt` counts only when it is literal `true`; anything else = no receipt | Inferred | safety |
 | D5 | Unknown input fields (e.g. a `decision` key in an upload) are dropped | Inferred | safety |
 | D6 | Zero or negative amounts -> flag | Inferred | safety |
+| D7 | An amount with a decimal comma (e.g. "12,50") is ambiguous and should be flagged, not read as 1250 | Inferred | mock eval set (MOCK-065); not yet enforced |
 
 ## Security
 | # | Assumption | Status | Source |

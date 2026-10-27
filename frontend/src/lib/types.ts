@@ -10,8 +10,7 @@ export interface Payload {
   decision: Decision;
   reasons: Reason[];
   question: string | null;
-  amount?: number | null;
-  currency?: string | null;
+  amount?: number | null; // always USD; null when unreadable or not in dollars
   category?: string | null;
   category_mapped_from?: string | null;
   client?: string | null;

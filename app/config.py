@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(ROOT, ".env"))
 
-POLICY_VERSION = "2026-10-27.3"
+POLICY_VERSION = "2026-10-27.4"
 PROMPT_VERSION = "v2"
 
 DECISIONS_ENDPOINT = os.getenv("DECISIONS_ENDPOINT", "http://localhost:8000/decisions")

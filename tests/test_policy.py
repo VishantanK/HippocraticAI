@@ -85,7 +85,7 @@ def test_unknown_category_flags():
 
 def test_split_detection():
     prior = {"id": "T-0", "date": "2026-06-15", "merchant": "Cava", "category": "Lunch",
-             "amount": 25.0, "currency": "USD", "is_client": False}
+             "amount": 25.0, "is_client": False}
     d, r = run(amount=20, history=[prior])
     assert d == "flag" and r[0]["rule"] == "possible_split"
     far = dict(prior, date="2026-06-10")
@@ -96,7 +96,7 @@ def test_split_detection():
 
 def test_duplicate_flags():
     prior = {"id": "T-0", "date": "2026-06-15", "merchant": "CAVA", "category": "Lunch",
-             "amount": 20.0, "currency": "USD", "is_client": False, "status": "approve"}
+             "amount": 20.0, "is_client": False, "status": "approve"}
     d, r = run(amount=20, history=[prior])
     assert d == "flag" and r[0]["rule"] == "possible_duplicate" and "T-0" in r[0]["detail"]
     assert run(amount=20, history=[dict(prior, status="reject")])[0] == "approve"   # rejected original
@@ -107,7 +107,7 @@ def test_duplicate_flags():
 
 def test_duplicate_applies_to_uncapped_categories():
     prior = {"id": "T-0", "date": "2026-06-15", "merchant": "Uber", "category": "GroundTransport",
-             "amount": 32.4, "currency": "USD", "is_client": False, "status": "approve"}
+             "amount": 32.4, "is_client": False, "status": "approve"}
     d, r = run(category="Uber", merchant="Uber", amount=32.4, sig={"category": "GroundTransport"}, history=[prior])
     assert d == "flag" and r[0]["rule"] == "possible_duplicate"
 
