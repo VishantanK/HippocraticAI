@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Bookmark, Search, ShieldAlert, TriangleAlert, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Download, Search, ShieldAlert, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Empty, ErrorState, Loading } from "../../components/States";
@@ -114,6 +114,11 @@ export default function AllExpenses() {
           <span className="sr-only">Search</span>
           <input className="field w-64 py-1.5 pl-8 text-sm" placeholder="Employee, merchant or ID" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
+        <a className={`btn-quiet py-1.5 text-sm ${total ? "" : "pointer-events-none opacity-50"}`} aria-disabled={!total}
+          href={`/api/expenses/export.csv?${apiParams(params, false)}`} download
+          title="Every expense matching these filters, not just this page">
+          <Download size={15} aria-hidden />Export CSV
+        </a>
       </div>
 
       <div className="grid gap-3 rounded-lg border border-line bg-panel p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">

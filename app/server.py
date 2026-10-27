@@ -176,6 +176,60 @@ def list_expenses(
     return rows
 
 
+EXPORT_COLUMNS = ["id", "external_id", "employee", "source", "date", "merchant", "category", "amount",
+                  "decision", "decided_by", "rules", "revision", "decided_at", "post_status"]
+
+
+def _cell(v):
+    """Text that a spreadsheet would run as a formula gets a leading quote. Memos and merchants are
+    untrusted (and sometimes adversarial by design), so every string cell goes through this."""
+    if v is None:
+        return ""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
+def _export_row(e):
+    p, raw = e.get("latest") or {}, e["raw"]
+    return [_cell(x) for x in (
+        e["id"], e.get("external_id"), e.get("employee"), e["source"], raw.get("date"), raw.get("merchant"),
+        p.get("category") or raw.get("category"), p["amount"] if p.get("amount") is not None else raw.get("amount"),
+        e.get("status"), e.get("decided_by"), " ".join(r["rule"] for r in p.get("reasons", [])),
+        p.get("revision"), p.get("decided_at"), e.get("post_status"))]
+
+
+# Registered before /api/expenses/{expense_id} so "export.csv" isn't read as an id.
+@app.get("/api/expenses/export.csv")
+def export_expenses(
+    status: str | None = None, manipulation: bool = False, source: str | None = None,
+    employee: str | None = None, category: str | None = None, date_from: str | None = None,
+    date_to: str | None = None, amount_min: float | None = None, amount_max: float | None = None,
+    rule: str | None = None, delivery: str | None = None, q: str | None = None,
+    sort: str = "updated", dir: str = "desc",
+):
+    """The same rows as the filtered list (no paging), latest decision per expense."""
+    f = _filters(status, manipulation, source, employee, category, date_from, date_to,
+                 amount_min, amount_max, rule, delivery, q)
+    rows, _ = store.query_expenses(f, sort, dir)
+
+    def gen():
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        buf.write("\ufeff")  # BOM so Excel reads UTF-8 names correctly
+        w.writerow(EXPORT_COLUMNS)
+        for e in rows:
+            w.writerow(_export_row(e))
+            if buf.tell() > 64_000:
+                yield buf.getvalue()
+                buf.seek(0); buf.truncate()
+        yield buf.getvalue()
+
+    name = f"expenses-{store.now()[:10]}.csv"
+    return StreamingResponse(gen(), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @app.get("/api/expenses/{expense_id}")
 def get_expense(expense_id: str):
     e = store.expense_detail(expense_id)

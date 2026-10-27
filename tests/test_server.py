@@ -224,6 +224,29 @@ def test_list_filters_and_pages_over_http():
     assert code == 422
 
 
+def test_csv_export_matches_filters_and_defuses_formulas():
+    import csv as csvmod
+    import io
+    submit(dict(EXP, merchant="=HYPERLINK(\"http://evil\")", employee="Export Person"))
+    submit(dict(EXP, merchant="Dropbox", employee="Export Person", memo="+cmd"))
+    submit(dict(EXP, merchant="Zoom", employee="Someone Else"))
+    with urllib.request.urlopen(f"{BASE}/api/expenses/export.csv?employee=Export+Person&sort=employee", timeout=10) as r:
+        assert r.headers["Content-Type"].startswith("text/csv")
+        assert "attachment" in r.headers["Content-Disposition"]
+        rows = list(csvmod.DictReader(io.StringIO(r.read().decode("utf-8-sig"))))
+    assert len(rows) == 2 and {r["employee"] for r in rows} == {"Export Person"}
+    merchants = {r["merchant"] for r in rows}
+    assert "'=HYPERLINK(\"http://evil\")" in merchants and "Dropbox" in merchants
+    assert all(r["decision"] and r["rules"] and r["revision"] for r in rows)
+    assert {"id", "amount", "category", "decided_by", "decided_at", "post_status"} <= set(rows[0])
+
+
+def test_csv_cell_guard():
+    from app.server import _cell
+    assert _cell("=1+1") == "'=1+1" and _cell("@SUM(A1)") == "'@SUM(A1)" and _cell("\tx") == "'\tx"
+    assert _cell("-5") == "'-5" and _cell(-5.0) == -5.0 and _cell("Nobu") == "Nobu" and _cell(None) == ""
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")
