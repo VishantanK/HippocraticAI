@@ -16,13 +16,13 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, jobs, outbox, pipeline, store
 
-STATIC = os.path.join(config.ROOT, "static")
+FRONTEND = os.path.join(config.ROOT, "frontend", "dist")  # built by `npm run build`
 UPLOADS = os.path.join(config.ROOT, "uploads")
 FIELDS = ("employee", "date", "category", "merchant", "amount", "memo", "receipt", "approval_code")
 MAX_UPLOAD_BYTES = 1_000_000
@@ -47,7 +47,8 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Expense Auto-Approver", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+if os.path.isdir(os.path.join(FRONTEND, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND, "assets")), name="assets")
 
 
 def _broadcast(event):
@@ -80,16 +81,22 @@ async def stream(request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-# --- pages --------------------------------------------------------------------
+# --- pages (React SPA; the router handles /employee/* and /finance/*) -------------
 
-@app.get("/")
-def employee_page():
-    return FileResponse(os.path.join(STATIC, "employee.html"))
+def _spa():
+    index = os.path.join(FRONTEND, "index.html")
+    if not os.path.exists(index):
+        return HTMLResponse("<p>Frontend not built. Run <code>cd frontend && npm install && npm run build</code>.</p>", 503)
+    return FileResponse(index)
 
 
-@app.get("/finance")
-def finance_page():
-    return FileResponse(os.path.join(STATIC, "finance.html"))
+@app.get("/", include_in_schema=False)
+@app.get("/employee", include_in_schema=False)
+@app.get("/employee/{path:path}", include_in_schema=False)
+@app.get("/finance", include_in_schema=False)
+@app.get("/finance/{path:path}", include_in_schema=False)
+def spa(path: str = ""):
+    return _spa()
 
 
 # --- API ----------------------------------------------------------------------
@@ -174,7 +181,7 @@ def _parse_upload(name, content):
 
 
 @app.post("/api/expenses/upload", status_code=202)
-def upload_expenses(file: UploadFile = File(...)):
+def upload_expenses(file: UploadFile = File(...), employee: str = Form("")):
     content = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "file too large")
@@ -188,6 +195,8 @@ def upload_expenses(file: UploadFile = File(...)):
     for row in rows:
         if not isinstance(row, dict):
             continue
+        if employee.strip() and not row.get("employee"):
+            row["employee"] = employee.strip()  # CSVs usually don't name the submitter
         ext = str(row.get("id"))[:40] if row.get("id") else None
         results.append(_submit(row, external_id=ext))
     return results

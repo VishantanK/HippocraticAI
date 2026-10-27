@@ -157,8 +157,9 @@ def test_upload_json_ignores_ids_and_labels():
 
 def test_upload_csv():
     csv = b"date,category,merchant,amount,memo,receipt,approval_code\n2026-06-15,Lunch,Chipotle,22.00,,true,\n"
-    _, res = call("POST", "/api/expenses/upload", form={"file": ("x.csv", csv)})
-    assert decided(res[0]["id"])["status"] == "approve"
+    _, res = call("POST", "/api/expenses/upload", form={"file": ("x.csv", csv), "employee": "Sofia Reyes"})
+    e = decided(res[0]["id"])
+    assert e["status"] == "approve" and e["employee"] == "Sofia Reyes"
 
 
 def test_override_posts_human_decision():
