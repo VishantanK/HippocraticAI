@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, pipeline, store
+from . import config, outbox, pipeline, store
 
 STATIC = os.path.join(config.ROOT, "static")
 UPLOADS = os.path.join(config.ROOT, "uploads")
@@ -37,7 +37,9 @@ async def lifespan(_app):
     global _loop
     _loop = asyncio.get_running_loop()
     store.conn()
+    outbox.start()
     yield
+    outbox.stop()
 
 
 app = FastAPI(title="Expense Auto-Approver", lifespan=lifespan)

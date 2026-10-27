@@ -6,7 +6,7 @@
 
 import threading
 
-from . import config, guard, llm, normalize, policy, poster, store
+from . import config, guard, llm, normalize, outbox, policy, poster, store  # noqa: F401 (poster: test seam)
 
 _listeners = []  # callables(event: dict); the web server registers one for SSE
 
@@ -165,7 +165,10 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
     """Full side-effecting path: store -> evaluate -> question -> store decision -> POST -> notify."""
     expense_id = expense_id or raw.get("id")
     with expense_lock(expense_id):
-        return _process_locked(dict(raw, id=expense_id), source, expense_id, external_id, use_llm)
+        payload = _process_locked(dict(raw, id=expense_id), source, expense_id, external_id, use_llm)
+    # Deliver outside the lock: a slow endpoint must not block the next edit.
+    outbox.deliver(expense_id, payload["revision"], payload)
+    return payload
 
 
 def _process_locked(raw, source, expense_id, external_id, use_llm):
@@ -202,7 +205,6 @@ def _process_locked(raw, source, expense_id, external_id, use_llm):
     signals = dict(result["signals"], question_source=question_source)
     revision = store.add_decision(expense_id, version, payload, signals)
     store.set_normalized(expense_id, norm, result["decision"])
-    store.mark_posted(expense_id, revision, poster.post_decision(payload))
     _notify({"type": "decision", "expense_id": expense_id, "payload": payload})
     return payload
 
@@ -223,6 +225,6 @@ def human_override(expense_id, decision, note, reviewer="finance"):
         }
         revision = store.add_decision(expense_id, e["version"], payload, {}, decided_by="human")
         store.set_normalized(expense_id, e.get("normalized") or {}, decision)
-        store.mark_posted(expense_id, revision, poster.post_decision(payload))
+    outbox.deliver(expense_id, revision, payload)
     _notify({"type": "decision", "expense_id": expense_id, "payload": payload})
     return payload

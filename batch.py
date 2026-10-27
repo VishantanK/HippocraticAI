@@ -4,13 +4,15 @@
 """
 
 import json
+import logging
 import sys
 from collections import Counter
 
-from app import pipeline
+from app import outbox, pipeline
 
 
 def main():
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     path = args[0] if args else "data/pending_expenses.json"
     use_llm = "--no-llm" not in sys.argv
@@ -28,6 +30,9 @@ def main():
         if d["question"]:
             print(f"{'':18} Q: {d['question']}")
     print(f"\n{dict(counts)}")
+    result = outbox.flush()  # one more pass for anything the endpoint refused
+    if result["failed"]:
+        print(f"WARNING: {result['failed']} decisions not delivered yet; the server's outbox will keep retrying.")
 
 
 if __name__ == "__main__":

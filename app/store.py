@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS decisions (
   decided_by TEXT NOT NULL,           -- system | human
   payload_json TEXT NOT NULL,         -- exact body POSTed to /decisions
   signals_json TEXT,                  -- guard + LLM extraction, for audit
-  post_status TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | failed
+  post_status TEXT NOT NULL DEFAULT 'pending',  -- pending | sent | failed | dead (see app/outbox.py)
   post_attempts INTEGER NOT NULL DEFAULT 0,
   decided_at TEXT NOT NULL,
   UNIQUE (expense_id, revision)
@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS followups (
 );
 """
 
+# Columns added after v1; applied on connect if missing.
+MIGRATIONS = [
+    ("decisions", "next_attempt_at", "TEXT"),
+    ("decisions", "last_error", "TEXT"),
+]
+
 _lock = threading.RLock()
 _conn = None
 
@@ -66,7 +72,13 @@ def conn():
         if _conn is None:
             _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
             _conn.row_factory = sqlite3.Row
+            _conn.execute("PRAGMA journal_mode=WAL")
             _conn.executescript(SCHEMA)
+            for table, column, ctype in MIGRATIONS:
+                cols = {r["name"] for r in _conn.execute(f"PRAGMA table_info({table})")}
+                if column not in cols:
+                    _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
+            _conn.commit()
         return _conn
 
 
@@ -145,6 +157,7 @@ def add_decision(expense_id, expense_version, payload, signals, decided_by="syst
         c = conn()
         r = c.execute("SELECT MAX(revision) FROM decisions WHERE expense_id=?", (expense_id,)).fetchone()[0]
         revision = payload["revision"] = (r or 0) + 1
+        payload["decision_key"] = f"{expense_id}:{revision}"  # idempotency key for downstream
         c.execute(
             "INSERT INTO decisions (expense_id, revision, expense_version, decision, decided_by, payload_json,"
             " signals_json, decided_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -159,12 +172,27 @@ def add_decision(expense_id, expense_version, payload, signals, decided_by="syst
         return revision
 
 
-def mark_posted(expense_id, revision, ok):
+def record_post(expense_id, revision, status, error=None, next_attempt_at=None):
     with _lock:
         conn().execute(
-            "UPDATE decisions SET post_status=?, post_attempts=post_attempts+1 WHERE expense_id=? AND revision=?",
-            ("sent" if ok else "failed", expense_id, revision))
+            "UPDATE decisions SET post_status=?, post_attempts=post_attempts+1, last_error=?, next_attempt_at=?"
+            " WHERE expense_id=? AND revision=?",
+            (status, error, next_attempt_at, expense_id, revision))
         conn().commit()
+
+
+def due_posts(now_iso, limit=50, ignore_backoff=False):
+    """Decisions still waiting to be delivered, oldest first."""
+    q = ("SELECT expense_id, revision, payload_json, post_attempts FROM decisions"
+         " WHERE post_status IN ('pending','failed')")
+    args = []
+    if not ignore_backoff:
+        q += " AND (next_attempt_at IS NULL OR next_attempt_at <= ?)"
+        args.append(now_iso)
+    q += " ORDER BY rowid LIMIT ?"
+    args.append(limit)
+    with _lock:
+        return [_row(r) for r in conn().execute(q, args)]
 
 
 def get_expense(expense_id):
