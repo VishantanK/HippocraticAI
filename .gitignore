@@ -6,7 +6,7 @@ __pycache__/
 logs/
 .DS_Store
 .claude/settings.local.json
-expenses.db
+expenses.db*
 received_decisions.jsonl
 uploads/
 frontend/node_modules/
