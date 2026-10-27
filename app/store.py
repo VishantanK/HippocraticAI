@@ -139,15 +139,12 @@ def add_answer(expense_id, answer):
         c.commit()
 
 
-def next_revision(expense_id):
-    with _lock:
-        r = conn().execute("SELECT MAX(revision) FROM decisions WHERE expense_id=?", (expense_id,)).fetchone()[0]
-        return (r or 0) + 1
-
-
-def add_decision(expense_id, revision, expense_version, payload, signals, decided_by="system"):
+def add_decision(expense_id, expense_version, payload, signals, decided_by="system"):
+    """Allocate the next revision and insert atomically. Sets payload["revision"]; returns it."""
     with _lock:
         c = conn()
+        r = c.execute("SELECT MAX(revision) FROM decisions WHERE expense_id=?", (expense_id,)).fetchone()[0]
+        revision = payload["revision"] = (r or 0) + 1
         c.execute(
             "INSERT INTO decisions (expense_id, revision, expense_version, decision, decided_by, payload_json,"
             " signals_json, decided_at) VALUES (?,?,?,?,?,?,?,?)",
@@ -159,6 +156,7 @@ def add_decision(expense_id, revision, expense_version, payload, signals, decide
             c.execute("INSERT INTO followups (expense_id, decision_revision, question, asked_at) VALUES (?,?,?,?)",
                       (expense_id, revision, payload["question"], payload["decided_at"]))
         c.commit()
+        return revision
 
 
 def mark_posted(expense_id, revision, ok):

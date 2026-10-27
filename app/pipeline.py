@@ -4,9 +4,21 @@
         -> store -> POST -> notify listeners (SSE)
 """
 
+import threading
+
 from . import config, guard, llm, normalize, policy, poster, store
 
 _listeners = []  # callables(event: dict); the web server registers one for SSE
+
+# One lock per expense: edits, answers and overrides on the same expense run one at a time,
+# so each evaluation sees the previous one's state and revisions stay ordered.
+_locks: dict[str, threading.RLock] = {}
+_locks_guard = threading.Lock()
+
+
+def expense_lock(expense_id):
+    with _locks_guard:
+        return _locks.setdefault(expense_id, threading.RLock())
 
 
 def on_decision(fn):
@@ -149,7 +161,11 @@ def build_question(raw, reasons, use_llm=True):
 def process(raw, source, expense_id=None, external_id=None, use_llm=True):
     """Full side-effecting path: store -> evaluate -> question -> store decision -> POST -> notify."""
     expense_id = expense_id or raw.get("id")
-    raw = dict(raw, id=expense_id)
+    with expense_lock(expense_id):
+        return _process_locked(dict(raw, id=expense_id), source, expense_id, external_id, use_llm)
+
+
+def _process_locked(raw, source, expense_id, external_id, use_llm):
     _notify({"type": "processing", "expense_id": expense_id})
     version = store.upsert_expense(expense_id, raw, source, external_id)
     current = store.get_expense(expense_id)
@@ -161,7 +177,6 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
         question, question_source = build_question(raw, result["reasons"], use_llm)
 
     norm = result["normalized"]
-    revision = store.next_revision(expense_id)
     payload = {
         "id": expense_id,
         "employee": raw.get("employee"),
@@ -174,7 +189,7 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
         "category_mapped_from": norm.get("category_mapped_from"),
         "client": norm.get("client_name") or None,
         "suspected_manipulation": result["suspected_manipulation"],
-        "revision": revision,
+        "revision": None,  # allocated atomically by store.add_decision
         "source": source,
         "decided_by": "system",
         "policy_version": config.POLICY_VERSION,
@@ -182,7 +197,7 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
         "decided_at": store.now(),
     }
     signals = dict(result["signals"], question_source=question_source)
-    store.add_decision(expense_id, revision, version, payload, signals)
+    revision = store.add_decision(expense_id, version, payload, signals)
     store.set_normalized(expense_id, norm, result["decision"])
     store.mark_posted(expense_id, revision, poster.post_decision(payload))
     _notify({"type": "decision", "expense_id": expense_id, "payload": payload})
@@ -193,18 +208,18 @@ def human_override(expense_id, decision, note, reviewer="finance"):
     """Finance reviewer resolves an expense. Recorded and POSTed like any decision."""
     if decision not in ("approve", "reject"):
         raise ValueError("decision must be approve or reject")
-    e = store.get_expense(expense_id)
-    if not e:
-        raise KeyError(expense_id)
-    revision = store.next_revision(expense_id)
-    payload = {
-        "id": expense_id, "employee": e["employee"], "decision": decision,
-        "reasons": [{"rule": "human_review", "detail": note or f"Decided by {reviewer}."}],
-        "question": None, "revision": revision, "source": e["source"], "decided_by": "human",
-        "reviewer": reviewer, "policy_version": config.POLICY_VERSION, "decided_at": store.now(),
-    }
-    store.add_decision(expense_id, revision, e["version"], payload, {}, decided_by="human")
-    store.set_normalized(expense_id, e.get("normalized") or {}, decision)
-    store.mark_posted(expense_id, revision, poster.post_decision(payload))
+    with expense_lock(expense_id):
+        e = store.get_expense(expense_id)
+        if not e:
+            raise KeyError(expense_id)
+        payload = {
+            "id": expense_id, "employee": e["employee"], "decision": decision,
+            "reasons": [{"rule": "human_review", "detail": note or f"Decided by {reviewer}."}],
+            "question": None, "revision": None, "source": e["source"], "decided_by": "human",
+            "reviewer": reviewer, "policy_version": config.POLICY_VERSION, "decided_at": store.now(),
+        }
+        revision = store.add_decision(expense_id, e["version"], payload, {}, decided_by="human")
+        store.set_normalized(expense_id, e.get("normalized") or {}, decision)
+        store.mark_posted(expense_id, revision, poster.post_decision(payload))
     _notify({"type": "decision", "expense_id": expense_id, "payload": payload})
     return payload
