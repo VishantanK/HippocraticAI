@@ -167,6 +167,9 @@ def _template_question(raw, reasons):
         "possible_manipulation": "note that Finance will review this expense",
         "high_amount_review": "attach the itemized receipt and a short business justification for this amount",
         "future_date": "confirm the date of the expense",
+        "stale_date": "confirm the date of the expense (it is more than 6 months ago)",
+        "missing_employee": "tell us who incurred this expense",
+        "multi_night_hotel": "tell us how many nights the stay covered and the nightly rate",
     }
     items = [asks[r["rule"]] for r in reasons if r["rule"] in asks]
     what = f"{raw.get('merchant') or 'your expense'} on {raw.get('date')} ({raw.get('amount')})"

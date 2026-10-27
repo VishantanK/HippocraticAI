@@ -18,5 +18,14 @@ Duplicate takes precedence over split, and rejected expenses are ignored by both
 - Reject duplicates: two identical coffees on one day can be real. Rejected.
 - No amount ceiling: one bad extraction (is_client) could approve thousands of dollars. Rejected.
 
+## Addendum (2026-10-27): typos and stale data
+Found by the 100-case mock eval set (`data/mock_cases.json`) and a probe of odd inputs:
+- Amounts: strict grammar in `normalize.parse_amount`; anything ambiguous is `invalid_amount`.
+  The text "nan" (or a JSON NaN) previously compared false with every cap and was **approved**.
+- `stale_date`: more than `STALE_MONTHS` (6) calendar months old. "Today" comes from
+  `config.today()`, which `EXPENSE_TODAY` pins for tests and eval.
+- `missing_merchant` also covers placeholders ("N/A", "-"); new `missing_employee`.
+- `multi_night_hotel`: the cap is per night, but code doesn't divide; a person checks the rate.
+
 ## Consequences
 More flags on high-value trips. Watch the $1,000 threshold with Finance. Eval unchanged (38/38).

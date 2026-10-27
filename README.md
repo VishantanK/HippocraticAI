@@ -41,7 +41,8 @@ Follow-up replies are labelled `reply_to_finance_N` so the screen knows they ans
 - **Delivery:** an outbox (`app/outbox.py`) claims each row atomically, retries with backoff
   (8 attempts, then `dead`), sends `Idempotency-Key: {id}:{revision}`, and never delivers a
   superseded revision. Verified: endpoint down for a batch of 18, all delivered exactly once on recovery.
-- **Backstop rules:** duplicates (a reply can't clear one), anything over $1,000, future dates.
+- **Backstop rules:** duplicates (a reply can't clear one), anything over $1,000, future dates or
+  dates over 6 months old, typo-like amounts ("12,50", "nan"), placeholder merchants, multi-night hotels.
 - **Human decisions are final** for that version: queued re-checks don't replace them, and an edit
   made after review can only flag.
 
@@ -62,8 +63,9 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
 
 ## Results
 - `eval.py`: **20/20** past decisions, **18/18** pending (gold labels in `data/expected_pending.json`),
+  **99/100** on the synthetic failure-mode set (`data/mock_cases.json`, `--suite mock`),
   zero false approves (a hard assertion).
-- `pytest` (83, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
+- `pytest` (128, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
   concurrency, outbox retry/ordering/claims, async jobs, and the races found in code review.
 
 ## POSTed decision

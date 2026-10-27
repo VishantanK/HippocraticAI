@@ -1,3 +1,5 @@
+import datetime as dt
+
 import pytest
 
 from app import normalize, policy
@@ -124,3 +126,57 @@ def test_high_amount_backstop():
 def test_future_date_flags():
     d, r = run(date="2999-01-01")
     assert d == "flag" and "future_date" in [x["rule"] for x in r]
+
+
+def test_today_is_pinned_for_tests():
+    from app import config
+    assert str(config.today()) == "2026-10-27"
+
+
+def test_over_six_months_old_goes_to_a_human():
+    office = {"category": "Office", "merchant": "Staples"}        # weekday-proof: no weekend-meal rule
+    d, r = run(date="2026-04-26", **office)
+    assert d == "flag" and [x["rule"] for x in r] == ["stale_date"]
+    assert run(date="2026-04-27", **office)[0] == "approve"       # exactly 6 months is not over
+    assert run(date="2016-06-15", **office)[0] == "flag"          # year typo
+    assert run(date="06/15/00", **office)[0] == "flag"            # two-digit year read as 2000
+    assert run(date="2026-04-26", category="Dinner", amount=95)[0] == "reject"  # a reject stays a reject
+
+
+def test_month_end_cutoff_clamps():
+    n = normalize.normalize(expense(date="2026-02-28", category="Office"))
+    n.update(id="T-1", employee="Dana Ng")
+    s = {"category": "Office", "category_confidence": 1, "is_client": False, "client_name": "", "city": ""}
+    assert policy.evaluate(n, s, (), CODES, today=dt.date(2026, 8, 31))[0] == "approve"  # cutoff Feb 28
+    assert policy.evaluate(n, s, (), CODES, today=dt.date(2026, 9, 1))[0] == "flag"
+
+
+@pytest.mark.parametrize("merchant", ["N/A", "n/a", "-", ".", "???", "unknown", "None", "TBD", " -- "])
+def test_placeholder_merchant_is_missing(merchant):
+    d, r = run(merchant=merchant)
+    assert d == "flag" and r[0]["rule"] == "missing_merchant"
+
+
+@pytest.mark.parametrize("merchant", ["7-Eleven", "Bar 51", "Noma", "A&W"])
+def test_short_or_odd_real_merchants_are_fine(merchant):
+    assert run(merchant=merchant)[0] == "approve"
+
+
+@pytest.mark.parametrize("employee", ["", "   ", None])
+def test_blank_employee_flags(employee):
+    d, r = run(employee=employee)
+    assert d == "flag" and r[0]["rule"] == "missing_employee"
+
+
+@pytest.mark.parametrize("memo", ["3 nights", "2-night stay", "two nights, Columbus", "Nights of 6/1-6/3"])
+def test_multi_night_hotel_goes_to_a_human(memo):
+    # The cap is per night, but nights aren't divided automatically: a person checks the rate.
+    d, r = run(category="Hotel", merchant="Hilton Columbus", amount=540, memo=memo)
+    assert d == "flag" and r[0]["rule"] == "multi_night_hotel"
+    assert run(category="Hotel", merchant="Hilton Columbus", amount=180, memo=memo)[0] == "flag"
+
+
+@pytest.mark.parametrize("memo", ["1 night", "one night", "overnight", ""])
+def test_single_night_hotel_still_capped(memo):
+    assert run(category="Hotel", merchant="Hilton Columbus", amount=190, memo=memo)[0] == "approve"
+    assert run(category="Hotel", merchant="Hilton Columbus", amount=260, memo=memo)[0] == "reject"

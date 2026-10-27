@@ -22,6 +22,29 @@ def _reason(rule, detail):
     return {"rule": rule, "detail": detail}
 
 
+# Words people type when they don't know the merchant; also anything with no letters or digits.
+PLACEHOLDER_MERCHANTS = {"na", "n/a", "none", "null", "unknown", "tbd", "test", "misc", "various"}
+# More than one night: "nights" anywhere, or a number above one before "night".
+MULTI_NIGHT_RE = re.compile(
+    r"\bnights\b|\b([2-9]|\d{2,}|two|three|four|five|six|seven|eight|nine|ten)[\s-]*nights?\b", re.IGNORECASE)
+
+
+def is_placeholder_merchant(name):
+    name = (name or "").strip().lower()
+    return not re.search(r"[a-z0-9]", name) or name in PLACEHOLDER_MERCHANTS
+
+
+def months_before(day, months):
+    """Same day-of-month `months` earlier, clamped to the month's end (Aug 31 - 6 -> Feb 28)."""
+    y, m = divmod(day.year * 12 + day.month - 1 - months, 12)
+    for d in range(day.day, 27, -1):
+        try:
+            return dt.date(y, m + 1, d)
+        except ValueError:
+            continue
+    return dt.date(y, m + 1, day.day)
+
+
 def is_tier1(city_text):
     t = f" {(city_text or '').lower()} "
     return any(alias in t for aliases in config.TIER1_CITIES.values() for alias in aliases)
@@ -29,7 +52,7 @@ def is_tier1(city_text):
 
 def evaluate(norm, signals, history=(), approval_codes=None, today=None):
     approval_codes = approval_codes if approval_codes is not None else config.load_approval_codes()
-    today = today or dt.date.today()
+    today = today or config.today()
     flags, rejects = [], []
 
     category = signals.get("category")
@@ -42,8 +65,11 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
     elif category in (None, "unknown") or signals.get("category_confidence", 0) < 0.7:
         flags.append(_reason("unknown_category",
                              f"Category {norm['category_raw']!r} does not map to a policy category."))
-    if not norm["merchant"]:
-        flags.append(_reason("missing_merchant", "No merchant was provided."))
+    if not (norm.get("employee") or "").strip():
+        flags.append(_reason("missing_employee", "No employee was given, so duplicate and split checks can't run."))
+    if is_placeholder_merchant(norm["merchant"]):
+        flags.append(_reason("missing_merchant", "No merchant was provided." if not norm["merchant"]
+                             else f"Merchant {norm['merchant']!r} is a placeholder, not a merchant name."))
     if norm.get("foreign_symbol"):
         flags.append(_reason("non_usd", f"Amount {norm['amount_raw']} isn't in US dollars; a USD amount is needed."))
     elif amount is None:
@@ -54,6 +80,8 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
         flags.append(_reason("invalid_date", "Date is missing or unreadable."))
     elif dt.date.fromisoformat(norm["date"]) > today:
         flags.append(_reason("future_date", f"Date {norm['date']} is in the future."))
+    elif dt.date.fromisoformat(norm["date"]) < months_before(today, config.STALE_MONTHS):
+        flags.append(_reason("stale_date", f"Date {norm['date']} is more than {config.STALE_MONTHS} months ago."))
 
     can_apply_caps = amount is not None and amount > 0 and \
         category not in (None, "unknown") and not any(f["rule"] in ("missing_category", "unknown_category") for f in flags)
@@ -68,7 +96,10 @@ def evaluate(norm, signals, history=(), approval_codes=None, today=None):
             if amount > cap:
                 rejects.append(_reason("meal_over_cap",
                                        f"{category} ${amount:.2f} exceeds the ${cap:.0f} cap (no client named)."))
-        if category == "Hotel":
+        if category == "Hotel" and MULTI_NIGHT_RE.search(f"{norm['merchant']} {norm['memo']}"):
+            # The cap is per night; a person checks the nightly rate rather than code guessing nights.
+            flags.append(_reason("multi_night_hotel", "Hotel stay covers more than one night; the nightly rate needs a check."))
+        elif category == "Hotel":
             location = " ".join(filter(None, [signals.get("city"), norm["merchant"], norm["memo"]]))
             tier1 = is_tier1(location)
             cap = config.HOTEL_CAP_TIER1 if tier1 else config.HOTEL_CAP

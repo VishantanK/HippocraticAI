@@ -22,4 +22,4 @@ v2 done: robustness + React UI. Next: polish from user review.
 - Rebuild the UI (`cd frontend && npm run build`) after frontend changes; FastAPI serves dist/.
 
 ## Last test result
-83 passed; eval 38/38, zero false approves
+128 passed; eval 38/38 + mock 99/100, zero false approves

@@ -19,6 +19,9 @@ Gap guidance:
 - possible_duplicate: ask whether this is a separate purchase or a duplicate of the expense named in the detail.
 - high_amount_review: ask for the itemized receipt and a one-line business justification.
 - future_date: ask for the correct date.
+- stale_date: ask them to confirm the date (it is over 6 months old; a year typo is common).
+- missing_employee: ask who incurred the expense.
+- multi_night_hotel: ask how many nights the stay covered and the nightly rate.
 - possible_split: ask whether the two charges were one meal split across bills, and how many people attended / whether a client was present.
 - edited_after_review / check_failed / possible_manipulation: say Finance will review it; ask nothing unless other gaps exist.
 - llm_unavailable / guard_unavailable: say the automated check couldn't complete and Finance will review; ask nothing unless other gaps exist.

@@ -1,5 +1,6 @@
 """Central configuration: policy tables, model ids, endpoints."""
 
+import datetime as dt
 import json
 import os
 
@@ -8,8 +9,8 @@ from dotenv import load_dotenv
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(ROOT, ".env"))
 
-POLICY_VERSION = "2026-10-27.4"
-PROMPT_VERSION = "v2"
+POLICY_VERSION = "2026-10-27.5"
+PROMPT_VERSION = "v3"
 
 DECISIONS_ENDPOINT = os.getenv("DECISIONS_ENDPOINT", "http://localhost:8000/decisions")
 DB_PATH = os.getenv("EXPENSE_DB", os.path.join(ROOT, "expenses.db"))
@@ -53,6 +54,16 @@ RECEIPT_THRESHOLD = 25.0
 
 # Backstop for uncapped categories: anything above this goes to a human even if within policy.
 HIGH_AMOUNT_REVIEW = float(os.getenv("HIGH_AMOUNT_REVIEW", "1000"))
+
+
+# Anything older than this goes to a human (late claim or a year typo like 2016 for 2026).
+STALE_MONTHS = 6
+
+
+def today():
+    """The policy's "today". EXPENSE_TODAY pins it (tests, eval) so fixed-date data doesn't age."""
+    pinned = os.getenv("EXPENSE_TODAY")
+    return dt.date.fromisoformat(pinned) if pinned else dt.date.today()
 
 
 def load_approval_codes():

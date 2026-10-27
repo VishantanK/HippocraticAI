@@ -6,21 +6,28 @@ the employee for the USD amount.
 """
 
 import datetime as dt
+import math
 import re
 import unicodedata
 
 USD_MARKERS = re.compile(r"US\$|USD|\$", re.IGNORECASE)
+# ASCII digits, commas only as thousands groups, at most two decimals. Anything else
+# ("12,50", "1.234,56", "1e1", "nan", "15.999") is a likely typo: ask, don't guess.
+AMOUNT_RE = re.compile(r"-?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]{1,2})?")
 
 
 def parse_amount(raw):
     """Return (amount: float|None, foreign_symbol: str|None, error: str|None).
 
     Plain numbers and $/US$/USD amounts are USD. Any other currency symbol (Unicode
-    category Sc, e.g. € £ ¥ ₹ ₩) returns that symbol and no amount.
+    category Sc, e.g. € £ ¥ ₹ ₩) returns that symbol and no amount. A number that isn't
+    plainly dollars and cents (see AMOUNT_RE; NaN/inf; sub-cent) is unreadable.
     """
     if isinstance(raw, bool):
         return None, None, "amount is not a number"
     if isinstance(raw, (int, float)):
+        if not math.isfinite(raw) or round(raw, 2) != raw:
+            return None, None, f"amount {raw!r} is not a dollar-and-cents value"
         return float(raw), None, None
     if not isinstance(raw, str) or not raw.strip():
         return None, None, "amount is missing"
@@ -29,11 +36,10 @@ def parse_amount(raw):
     foreign = next((c for c in s if unicodedata.category(c) == "Sc"), None)
     if foreign:
         return None, foreign, None
-    s = s.replace(",", "").strip()
-    try:
-        return float(s), None, None
-    except ValueError:
+    s = re.sub(r"\s+", "", s)
+    if not AMOUNT_RE.fullmatch(s):
         return None, None, f"could not read amount {raw!r}"
+    return float(s.replace(",", "")), None, None
 
 
 def parse_date(raw):

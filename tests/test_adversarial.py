@@ -78,6 +78,14 @@ def test_odd_amounts_never_approved(amount):
     assert ev(expense(category="Office", amount=amount))["decision"] == "flag"
 
 
+@pytest.mark.parametrize("amount", ["nan", float("nan"), "12,50", "1.234,56", "1e1"])
+@pytest.mark.parametrize("category", ["Dinner", "Office"])
+def test_mistyped_amounts_flag_not_decide(amount, category):
+    # NaN compares false with every cap, so it used to sail through to approve.
+    res = ev(expense(category=category, amount=amount))
+    assert res["decision"] == "flag" and res["reasons"][0]["rule"] == "invalid_amount"
+
+
 def test_huge_amount_without_receipt_flags():
     assert ev(expense(category="Office", amount=1e9, receipt=False))["decision"] == "flag"
 

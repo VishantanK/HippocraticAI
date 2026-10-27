@@ -11,7 +11,7 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | P2 | "No weekend meals except clients" = Sat/Sun meal with no client is **rejected** | Inferred | notes #1; EXP-1020 (Sat) rejected |
 | P3 | A client meal or client Entertainment needs a **named external org/person** in the memo; "team dinner" is not a client | Inferred | EXP-1017 vs 1018 |
 | P4 | Entertainment with no client = reject | Inferred | notes #7 "ONLY Client" |
-| P5 | Hotel cap is per night ($200, or $350 in Tier-1 cities); the location comes from merchant/memo/LLM city | Inferred | notes #5; EXP-1012/1013/1014 |
+| P5 | Hotel cap is per night ($200, or $350 in Tier-1 cities); the location comes from merchant/memo/LLM city. A stay that mentions more than one night ("3 nights", "2-night", "nights") is **flagged** `multi_night_hotel`, never divided by code; one night or unstated = the total is capped | Confirmed (multi-night) | notes #5; EXP-1012/1013/1014; user chose "Flag multi-night" |
 | P6 | Receipt is needed when amount **> $25** (exactly $25 is fine); missing = **flag** | Inferred | notes #8; EXP-1006/1008 approve, 1009 flag |
 | P7 | Software with no approval code = **flag** (not reject); codes are checked against `data/approval_codes.json` | Inferred | notes #9; EXP-1010 flagged |
 | P8 | Airfare is uncapped (not in notes) | Inferred | EXP-1016 approved |
@@ -27,6 +27,9 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | P18 | Rejected expenses are ignored for split and duplicate checks (they aren't paid) | Inferred | design |
 | P19 | A Finance decision is final for that version: queued automatic re-checks don't replace it, and an edit made after review can't auto-approve (it's flagged `edited_after_review`) | Inferred | review finding |
 | P20 | If a decision job crashes, the expense is flagged `check_failed` (stored and POSTed) | Inferred | fail closed |
+| P21 | An expense dated more than **6 calendar months** before today is flagged `stale_date` (late claim or a year typo); a reject stays a reject | Confirmed | user |
+| P22 | A placeholder merchant (no letters/digits, or N/A, none, unknown, TBD, misc, various...) counts as `missing_merchant` | Confirmed | user chose "Flag both" |
+| P23 | A blank employee is flagged `missing_employee` (duplicate and split checks can't run without one) | Confirmed | user chose "Flag both" |
 
 ## Data
 | # | Assumption | Status | Source |
@@ -37,7 +40,8 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | D4 | `receipt` counts only when it is literal `true`; anything else = no receipt | Inferred | safety |
 | D5 | Unknown input fields (e.g. a `decision` key in an upload) are dropped | Inferred | safety |
 | D6 | Zero or negative amounts -> flag | Inferred | safety |
-| D7 | An amount with a decimal comma (e.g. "12,50") is ambiguous and should be flagged, not read as 1250 | Inferred | mock eval set (MOCK-065); not yet enforced |
+| D7 | Amounts must be plain dollars and cents: ASCII digits, commas only as thousands groups, at most 2 decimals, finite. "12,50", "1.234,56", "1,0000", "1e1", "nan", "15.999" are **flagged** `invalid_amount`, never guessed | Confirmed | user ("should be flagged as a typo"); MOCK-065; NaN used to approve |
+| D8 | "Today" for date rules is the real date unless `EXPENSE_TODAY` pins it (tests and eval pin 2026-10-27 so fixed-date data doesn't age) | Inferred | design |
 
 ## Security
 | # | Assumption | Status | Source |

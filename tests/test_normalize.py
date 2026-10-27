@@ -33,3 +33,20 @@ def test_dates_and_weekend():
 def test_receipt_must_be_literal_true():
     assert normalize({"receipt": "yes"})["receipt"] is False
     assert normalize({"receipt": True})["receipt"] is True
+
+
+def test_ambiguous_or_mistyped_amounts_are_unreadable():
+    # A typo must be asked about, not guessed: "12,50" is not $1,250 and "1.234,56" is not $1.23.
+    for raw in ["12,50", "1,5", "1,0000", "1.234,56", "1,234.5,6", "15.999", "15.", ".5",
+                "1e1", "1e308", "1_5", "nan", "inf", "Infinity", "１５", "١٥"]:
+        assert parse_amount(raw)[0] is None and parse_amount(raw)[2], raw
+    assert parse_amount("1,234.56") == (1234.56, None, None)      # proper thousands grouping is fine
+    assert parse_amount("$$15") == (15.0, None, None)
+    assert parse_amount("-$15") == (-15.0, None, None)            # parsed; policy flags it as non-positive
+
+
+def test_non_finite_or_sub_cent_numbers_are_unreadable():
+    for raw in [float("nan"), float("inf"), float("-inf"), 15.999]:
+        assert parse_amount(raw)[0] is None and parse_amount(raw)[2], raw
+    assert parse_amount(52.75) == (52.75, None, None)
+    assert parse_amount(32.4) == (32.4, None, None)
