@@ -2,13 +2,15 @@
 
   uvicorn app.server:app --port 8001
 
-Sync endpoints run in FastAPI's threadpool, so slow LLM calls don't block the loop.
+Writes return 202 with status 'checking'; app/jobs.py decides in the background and the
+result arrives over SSE (/api/stream). Overrides are quick and stay synchronous.
 """
 
 import asyncio
 import csv
 import io
 import json
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -18,7 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, outbox, pipeline, store
+from . import config, jobs, outbox, pipeline, store
 
 STATIC = os.path.join(config.ROOT, "static")
 UPLOADS = os.path.join(config.ROOT, "uploads")
@@ -35,9 +37,11 @@ _loop: asyncio.AbstractEventLoop | None = None
 @asynccontextmanager
 async def lifespan(_app):
     global _loop
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     _loop = asyncio.get_running_loop()
     store.conn()
     outbox.start()
+    jobs.recover()
     yield
     outbox.stop()
 
@@ -105,10 +109,17 @@ def _raw(data):
     return {k: data.get(k) for k in FIELDS}
 
 
-def _submit(raw, external_id=None):
-    expense_id = store.next_portal_id()
-    pipeline.process(_raw(raw), source="portal", expense_id=expense_id, external_id=external_id)
+def _accept(expense_id, raw=None, external_id=None):
+    """Store the change, mark it 'checking', and decide in the background (result over SSE)."""
+    if raw is not None:
+        store.upsert_expense(expense_id, _raw(raw), "portal", external_id)
+    store.set_status(expense_id, "checking")
+    jobs.enqueue(expense_id)
     return store.expense_detail(expense_id)
+
+
+def _submit(raw, external_id=None):
+    return _accept(store.next_portal_id(), raw, external_id)
 
 
 @app.get("/api/expenses")
@@ -124,20 +135,19 @@ def get_expense(expense_id: str):
     return e
 
 
-@app.post("/api/expenses")
+@app.post("/api/expenses", status_code=202)
 def create_expense(body: ExpenseIn):
     return _submit(body.model_dump())
 
 
-@app.put("/api/expenses/{expense_id}")
+@app.put("/api/expenses/{expense_id}", status_code=202)
 def edit_expense(expense_id: str, body: ExpenseIn):
     e = store.get_expense(expense_id)
     if not e:
         raise HTTPException(404, "not found")
     if e["source"] != "portal":
         raise HTTPException(403, "only portal submissions can be edited")
-    pipeline.process(_raw(body.model_dump()), source="portal", expense_id=expense_id)
-    return store.expense_detail(expense_id)
+    return _accept(expense_id, body.model_dump())
 
 
 def _parse_upload(name, content):
@@ -152,7 +162,7 @@ def _parse_upload(name, content):
     return data if isinstance(data, list) else [data]
 
 
-@app.post("/api/expenses/upload")
+@app.post("/api/expenses/upload", status_code=202)
 def upload_expenses(file: UploadFile = File(...)):
     content = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
@@ -172,7 +182,7 @@ def upload_expenses(file: UploadFile = File(...)):
     return results
 
 
-@app.post("/api/expenses/{expense_id}/answer")
+@app.post("/api/expenses/{expense_id}/answer", status_code=202)
 def answer_followup(
     expense_id: str,
     text: str = Form(""),
@@ -202,8 +212,7 @@ def answer_followup(
     if not text.strip() and not fields:
         raise HTTPException(400, "empty answer")
     store.add_answer(expense_id, {"text": text.strip(), "fields": fields, "at": store.now()})
-    pipeline.process(e["raw"], source=e["source"], expense_id=expense_id)
-    return store.expense_detail(expense_id)
+    return _accept(expense_id)
 
 
 class OverrideIn(BaseModel):

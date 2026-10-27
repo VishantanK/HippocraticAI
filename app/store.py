@@ -139,6 +139,17 @@ def set_normalized(expense_id, normalized, status):
         conn().commit()
 
 
+def set_status(expense_id, status):
+    with _lock:
+        conn().execute("UPDATE expenses SET status=?, updated_at=? WHERE id=?", (status, now(), expense_id))
+        conn().commit()
+
+
+def ids_with_status(status):
+    with _lock:
+        return [r[0] for r in conn().execute("SELECT id FROM expenses WHERE status=?", (status,))]
+
+
 def add_answer(expense_id, answer):
     with _lock:
         c = conn()

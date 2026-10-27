@@ -25,7 +25,7 @@ def on_decision(fn):
     _listeners.append(fn)
 
 
-def _notify(event):
+def notify(event):
     for fn in _listeners:
         try:
             fn(event)
@@ -171,10 +171,12 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
     return payload
 
 
-def _process_locked(raw, source, expense_id, external_id, use_llm):
-    _notify({"type": "processing", "expense_id": expense_id})
-    version = store.upsert_expense(expense_id, raw, source, external_id)
+def _process_locked(raw, source, expense_id, external_id, use_llm, save_raw=True):
+    notify({"type": "processing", "expense_id": expense_id})
+    if save_raw:
+        store.upsert_expense(expense_id, raw, source, external_id)
     current = store.get_expense(expense_id)
+    version = current["version"]
     history = store.employee_history(raw.get("employee"), expense_id) if raw.get("employee") else []
 
     result = evaluate(raw, answers=current["answers"], history=history, use_llm=use_llm)
@@ -205,7 +207,19 @@ def _process_locked(raw, source, expense_id, external_id, use_llm):
     signals = dict(result["signals"], question_source=question_source)
     revision = store.add_decision(expense_id, version, payload, signals)
     store.set_normalized(expense_id, norm, result["decision"])
-    _notify({"type": "decision", "expense_id": expense_id, "payload": payload})
+    notify({"type": "decision", "expense_id": expense_id, "payload": payload})
+    return payload
+
+
+def process_stored(expense_id, use_llm=True):
+    """Re-evaluate an expense from its latest stored state (used by background jobs)."""
+    with expense_lock(expense_id):
+        e = store.get_expense(expense_id)
+        if not e:
+            raise KeyError(expense_id)
+        # save_raw=False: the stored raw is the source of truth; never write back a stale copy.
+        payload = _process_locked(e["raw"], e["source"], expense_id, e["external_id"], use_llm, save_raw=False)
+    outbox.deliver(expense_id, payload["revision"], payload)
     return payload
 
 
@@ -226,5 +240,5 @@ def human_override(expense_id, decision, note, reviewer="finance"):
         revision = store.add_decision(expense_id, e["version"], payload, {}, decided_by="human")
         store.set_normalized(expense_id, e.get("normalized") or {}, decision)
     outbox.deliver(expense_id, revision, payload)
-    _notify({"type": "decision", "expense_id": expense_id, "payload": payload})
+    notify({"type": "decision", "expense_id": expense_id, "payload": payload})
     return payload
