@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finance Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Finance Dashboard</h1>
+  <span class="live" id="live">live</span>
+  <nav><a href="/">Submit expenses</a><a href="/finance" class="active">Finance dashboard</a></nav>
+</header>
+<main>
+  <div class="kpis" id="kpis"></div>
+  <div class="grid" style="grid-template-columns: 1fr minmax(340px, 440px)">
+    <section class="panel">
+      <div class="filters">
+        <select id="f-decision">
+          <option value="">All decisions</option><option value="flag">Flagged (needs human)</option>
+          <option value="approve">Approved</option><option value="reject">Rejected</option>
+        </select>
+        <select id="f-source"><option value="">All sources</option><option value="batch">Batch</option><option value="portal">Portal</option></select>
+        <select id="f-followup">
+          <option value="">Any follow-up</option><option value="open">Waiting on employee</option><option value="answered">Employee answered</option>
+        </select>
+        <input type="text" id="f-q" placeholder="Search employee, merchant, id">
+      </div>
+      <table>
+        <thead><tr><th>ID</th><th>Employee</th><th>Date</th><th>Merchant</th><th>Category</th><th class="num">Amount</th><th>Decision</th><th>Rev</th><th>POST</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+    <section class="panel" id="detail"><div class="empty">Select an expense to see why it was decided.</div></section>
+  </div>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let all = [], selected = null;
+
+async function load() {
+  all = await api("/api/expenses");
+  renderKpis(); renderRows();
+  if (selected) showDetail(selected);
+}
+
+function followupState(e) {
+  const p = e.latest;
+  if (!p || p.decision !== "flag") return "";
+  return (e.answers || []).length && p.revision > 1 ? "answered" : "open";
+}
+
+function renderKpis() {
+  const c = d => all.filter(e => e.status === d).length;
+  const manip = all.filter(e => e.latest && e.latest.suspected_manipulation).length;
+  const failed = all.filter(e => e.post_status === "failed").length;
+  const tiles = [["Total", all.length], ["Approved", c("approve")], ["Rejected", c("reject")],
+                 ["Flagged", c("flag")], ["Manipulation attempts", manip], ["POST failures", failed]];
+  $("kpis").innerHTML = tiles.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function renderRows() {
+  const d = $("f-decision").value, s = $("f-source").value, f = $("f-followup").value, q = $("f-q").value.toLowerCase();
+  const rows = all.filter(e =>
+    (!d || e.status === d) && (!s || e.source === s) && (!f || followupState(e) === f) &&
+    (!q || [e.id, e.employee, e.raw.merchant, e.external_id].join(" ").toLowerCase().includes(q)));
+  $("rows").innerHTML = rows.length ? rows.map(e => {
+    const p = e.latest || {};
+    const shield = p.suspected_manipulation ? ' <span class="badge shield" title="Suspected manipulation">!</span>' : "";
+    const human = e.decided_by === "human" ? ' <span class="muted">(human)</span>' : "";
+    return `<tr class="clickable ${e.id === selected ? "selected" : ""}" data-id="${esc(e.id)}">
+      <td>${esc(e.id)}${e.external_id ? `<div class="muted">${esc(e.external_id)}</div>` : ""}</td>
+      <td>${esc(e.employee)}</td><td>${esc(e.raw.date)}</td><td>${esc(e.raw.merchant)}</td>
+      <td>${esc(p.category || e.raw.category)}${p.category_mapped_from ? `<div class="muted">from "${esc(p.category_mapped_from)}"</div>` : ""}</td>
+      <td class="num">${esc(money(p) || e.raw.amount)}</td>
+      <td>${badge(e.status)}${shield}${human}</td><td>${p.revision ?? ""}</td>
+      <td>${e.post_status === "sent" ? "✓" : esc(e.post_status || "")}</td></tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">Nothing matches.</td></tr>`;
+  document.querySelectorAll("#rows tr[data-id]").forEach(tr => tr.onclick = () => showDetail(tr.dataset.id));
+}
+
+async function showDetail(id) {
+  selected = id;
+  renderRows();
+  const e = await api(`/api/expenses/${id}`);
+  const p = latest(e);
+  const sig = (e.decisions.at(-1) || {}).signals || {};
+  const screen = (sig.guard || {}).screen;
+  let html = `<div class="result-head">${badge(p && p.decision)}<strong>${esc(e.id)}</strong>
+    <span class="muted">${esc(e.source)}${e.external_id ? " · " + esc(e.external_id) : ""}</span></div>
+    <table>${["employee", "date", "category", "merchant", "amount", "memo", "receipt", "approval_code"].map(k =>
+      `<tr><th>${k}</th><td>${esc(JSON.stringify(e.raw[k]))}</td></tr>`).join("")}</table>`;
+  if (p) {
+    html += `<h2 style="margin-top:16px">Why</h2><ul class="reasons">${p.reasons.map(r => `<li><code>${esc(r.rule)}</code> ${esc(r.detail)}</li>`).join("")}</ul>`;
+    if (p.client) html += `<p class="muted">Client: ${esc(p.client)}</p>`;
+    if (screen) html += `<p class="muted">Guard screen: ${esc(screen.detector)}, p(manipulation)=${screen.probability != null ? Number(screen.probability).toFixed(2) : "n/a"}</p>`;
+    if (sig.llm_error || (sig.guard || {}).guard_error) html += `<p style="color:var(--reject)">Check failed: ${esc(sig.llm_error || sig.guard.guard_error)}</p>`;
+  }
+  if (p && p.decision === "flag") {
+    html += `<h2 style="margin-top:16px">Resolve</h2><textarea id="o-note" placeholder="Note (optional)"></textarea>
+      <div class="actions"><button class="ok" data-d="approve">Approve</button><button class="danger" data-d="reject">Reject</button><span class="muted" id="o-status"></span></div>`;
+  } else if (p) {
+    html += `<div class="actions"><button class="secondary" data-d="${p.decision === "approve" ? "reject" : "approve"}">Override to ${p.decision === "approve" ? "reject" : "approve"}</button><span class="muted" id="o-status"></span></div>`;
+  }
+  html += `<h2 style="margin-top:16px">History</h2><div class="timeline">` + e.decisions.map(d => {
+    const fu = e.followups.find(f => f.decision_revision === d.revision);
+    return `<div class="item">${badge(d.decision)} <strong>rev ${d.revision}</strong> <span class="muted">${esc(d.decided_at)} · ${esc(d.decided_by)} · POST ${esc(d.post_status)}</span>
+      ${fu ? `<div class="muted">Q: ${esc(fu.question)}</div>${fu.answer ? `<div class="muted">A: ${esc(fu.answer)}</div>` : `<div class="muted">(${esc(fu.status)})</div>`}` : ""}</div>`;
+  }).join("") + `</div><details><summary class="muted">Last POSTed payload</summary><pre>${esc(JSON.stringify(p, null, 2))}</pre></details>`;
+  $("detail").innerHTML = html;
+  $("detail").querySelectorAll("button[data-d]").forEach(b => b.onclick = async () => {
+    $("o-status").innerHTML = '<span class="spinner"></span>';
+    try {
+      await api(`/api/expenses/${id}/override`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: b.dataset.d, note: ($("o-note") || {}).value || "" }) });
+    } catch (err) { $("o-status").textContent = err.message; }
+  });
+}
+
+["f-decision", "f-source", "f-followup"].forEach(id => $(id).onchange = renderRows);
+$("f-q").oninput = renderRows;
+
+let refresh = null;
+subscribe(ev => {
+  if (ev.type !== "decision") return;
+  clearTimeout(refresh);
+  refresh = setTimeout(load, 300);  // coalesce bursts (batch runs)
+});
+load();
+</script>
+</body>
+</html>

@@ -47,7 +47,8 @@ def evaluate(raw, answers=None, history=(), use_llm=True, extract_fn=None, guard
     """
     merged = dict(raw)
     for a in answers or []:
-        merged.update({k: v for k, v in (a.get("fields") or {}).items() if v not in (None, "")})
+        merged.update({k: v for k, v in (a.get("fields") or {}).items()
+                       if k in guard.ALLOWED_FIELDS and v not in (None, "")})
     answer_text = {f"answer_{i + 1}": a["text"] for i, a in enumerate(answers or []) if a.get("text")}
 
     # 1. input guard ---------------------------------------------------------
@@ -149,6 +150,7 @@ def process(raw, source, expense_id=None, external_id=None, use_llm=True):
     """Full side-effecting path: store -> evaluate -> question -> store decision -> POST -> notify."""
     expense_id = expense_id or raw.get("id")
     raw = dict(raw, id=expense_id)
+    _notify({"type": "processing", "expense_id": expense_id})
     version = store.upsert_expense(expense_id, raw, source, external_id)
     current = store.get_expense(expense_id)
     history = store.employee_history(raw.get("employee"), expense_id) if raw.get("employee") else []

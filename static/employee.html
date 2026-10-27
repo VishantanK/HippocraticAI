@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Portal</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Expense Portal</h1>
+  <span class="live">live</span>
+  <nav><a href="/" class="active">Submit expenses</a><a href="/finance">Finance dashboard</a></nav>
+</header>
+<main>
+  <div class="grid">
+    <section>
+      <div class="panel">
+        <label for="me">Your name</label>
+        <input type="text" id="me" placeholder="e.g. Dana Ng">
+      </div>
+
+      <div class="panel">
+        <div class="tabs">
+          <button id="tab-manual" class="active">Enter manually</button>
+          <button id="tab-upload">Upload file</button>
+        </div>
+
+        <form id="manual">
+          <div class="muted" id="editing">New expense</div>
+          <div class="row">
+            <div><label for="f-date">Date</label><input type="date" id="f-date" name="date"></div>
+            <div><label for="f-amount">Amount</label><input type="text" id="f-amount" name="amount" placeholder="42.50 (or €65.00)"></div>
+          </div>
+          <div class="row">
+            <div><label for="f-category">Category</label><input type="text" id="f-category" name="category" list="cats" placeholder="Lunch"></div>
+            <div><label for="f-merchant">Merchant</label><input type="text" id="f-merchant" name="merchant" placeholder="Cava"></div>
+          </div>
+          <datalist id="cats"></datalist>
+          <label for="f-memo">Memo (business purpose; name the client if any)</label>
+          <textarea id="f-memo" name="memo" placeholder="Dinner w/ Acme Corp re: renewal"></textarea>
+          <label for="f-code">Approval code (software only)</label>
+          <input type="text" id="f-code" name="approval_code" placeholder="SW-1234">
+          <label class="check"><input type="checkbox" id="f-receipt" name="receipt"> I have a receipt</label>
+          <div class="actions">
+            <button type="submit" id="submit">Submit</button>
+            <button type="button" class="secondary" id="new">New expense</button>
+            <span class="muted" id="autosave"></span>
+          </div>
+        </form>
+
+        <form id="upload" hidden>
+          <p class="muted">A JSON file (one expense or a list) or a CSV with columns
+            date, category, merchant, amount, memo, receipt, approval_code. Each row is checked on its own.</p>
+          <input type="file" id="u-file" accept=".json,.csv">
+          <div class="actions"><button type="submit">Upload &amp; check</button><span class="muted" id="u-status"></span></div>
+        </form>
+      </div>
+    </section>
+
+    <section>
+      <div class="panel" id="result"><div class="empty">Submit an expense to see the decision here.</div></div>
+      <div class="panel">
+        <h2>My expenses</h2>
+        <table>
+          <thead><tr><th>ID</th><th>Date</th><th>Merchant</th><th class="num">Amount</th><th>Status</th></tr></thead>
+          <tbody id="mine"><tr><td colspan="5" class="empty">Enter your name to see your expenses.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="/static/common.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let currentId = null;      // expense bound to the form (edits re-check it)
+let shownId = null;        // expense shown in the result panel
+let saveTimer = null, inflight = false, dirty = false;
+
+$("cats").innerHTML = CATEGORIES.map(c => `<option value="${c}">`).join("");
+try { $("me").value = localStorage.getItem("me") || ""; } catch (e) {}
+$("me").addEventListener("change", () => { try { localStorage.setItem("me", $("me").value); } catch (e) {} loadMine(); });
+
+$("tab-manual").onclick = () => { $("manual").hidden = false; $("upload").hidden = true; $("tab-manual").classList.add("active"); $("tab-upload").classList.remove("active"); };
+$("tab-upload").onclick = () => { $("manual").hidden = true; $("upload").hidden = false; $("tab-upload").classList.add("active"); $("tab-manual").classList.remove("active"); };
+
+function formData() {
+  const amt = $("f-amount").value.trim();
+  return {
+    employee: $("me").value.trim() || null,
+    date: $("f-date").value || null,
+    category: $("f-category").value.trim() || null,
+    merchant: $("f-merchant").value.trim() || null,
+    amount: amt === "" ? null : (/^-?\d+(\.\d+)?$/.test(amt) ? Number(amt) : amt),
+    memo: $("f-memo").value.trim(),
+    receipt: $("f-receipt").checked,
+    approval_code: $("f-code").value.trim() || null,
+  };
+}
+
+function fillForm(raw) {
+  $("f-date").value = raw.date && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : "";
+  $("f-amount").value = raw.amount ?? "";
+  $("f-category").value = raw.category || "";
+  $("f-merchant").value = raw.merchant || "";
+  $("f-memo").value = raw.memo || "";
+  $("f-code").value = raw.approval_code || "";
+  $("f-receipt").checked = raw.receipt === true;
+}
+
+function bind(id) {
+  currentId = id;
+  $("editing").textContent = id ? `Editing ${id}: changes are re-checked automatically` : "New expense";
+  $("submit").textContent = id ? "Re-check now" : "Submit";
+}
+
+$("new").onclick = () => { bind(null); $("manual").reset(); };
+
+$("manual").addEventListener("submit", async e => {
+  e.preventDefault();
+  if (!$("me").value.trim()) { $("me").focus(); return alert("Please enter your name first."); }
+  if (currentId) return save();
+  showPending();
+  try {
+    const exp = await api("/api/expenses", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData()) });
+    bind(exp.id);
+    render(exp);
+    loadMine();
+  } catch (err) { showError(err); }
+});
+
+// Edits to a submitted expense are re-classified after a short pause.
+$("manual").addEventListener("input", () => {
+  if (!currentId) return;
+  $("autosave").textContent = "editing…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 1200);
+});
+
+async function save() {
+  if (!currentId) return;
+  if (inflight) { dirty = true; return; }
+  inflight = true; dirty = false;
+  $("autosave").innerHTML = '<span class="spinner"></span> re-checking…';
+  try {
+    const exp = await api(`/api/expenses/${currentId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData()) });
+    render(exp);
+    $("autosave").textContent = "saved & re-checked";
+    loadMine();
+  } catch (err) { showError(err); $("autosave").textContent = ""; }
+  inflight = false;
+  if (dirty) save();
+}
+
+$("upload").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = $("u-file").files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  $("u-status").innerHTML = '<span class="spinner"></span> checking…';
+  try {
+    const results = await api("/api/expenses/upload", { method: "POST", body: fd });
+    $("u-status").textContent = `${results.length} checked`;
+    if (results.length && !$("me").value && results[0].employee) { $("me").value = results[0].employee; try { localStorage.setItem("me", results[0].employee); } catch (e) {} }
+    if (results.length) render(results[0]);
+    loadMine();
+  } catch (err) { $("u-status").textContent = err.message; }
+});
+
+function showPending() {
+  $("result").innerHTML = '<div class="result-head"><span class="badge pending big">checking</span><span class="spinner"></span></div><p class="muted">Running policy checks…</p>';
+}
+function showError(err) { $("result").innerHTML = `<p style="color:var(--reject)">${esc(err.message)}</p>`; }
+
+const NEXT_STEP = {
+  approve: "Approved. Nothing else is needed; it will be reimbursed.",
+  reject: "Rejected under the expense policy. Contact Finance if you think this is wrong.",
+  flag: "Needs more information. Please answer the question below.",
+};
+
+function answerFields(reasons) {
+  const rules = new Set(reasons.map(r => r.rule));
+  let html = "";
+  if (rules.has("missing_receipt")) html += `<label>Receipt file</label><input type="file" name="receipt_file" accept="image/*,.pdf">`;
+  if (rules.has("missing_approval_code") || rules.has("unknown_approval_code")) html += `<label>Approval code</label><input type="text" name="approval_code" placeholder="SW-1234">`;
+  if (rules.has("missing_category") || rules.has("unknown_category")) html += `<label>Category</label><select name="category"><option value=""></option>${CATEGORIES.map(c => `<option>${c}</option>`).join("")}</select>`;
+  if (["non_usd", "invalid_amount", "non_positive_amount"].some(r => rules.has(r))) html += `<label>Amount in USD (as charged)</label><input type="text" name="amount" placeholder="70.20">`;
+  if (rules.has("missing_merchant")) html += `<label>Merchant</label><input type="text" name="merchant">`;
+  return html;
+}
+
+function render(exp) {
+  shownId = exp.id;
+  const p = latest(exp);
+  if (!p) return showPending();
+  const open = (exp.followups || []).find(f => f.status === "open");
+  const answered = (exp.followups || []).filter(f => f.status !== "open" && f.answer);
+  let html = `<div class="result-head">${badge(p.decision).replace('class="badge', 'class="badge big')}
+      <strong>${esc(exp.id)}</strong><span class="muted">revision ${p.revision}</span></div>
+    <p>${esc(NEXT_STEP[p.decision])}</p>
+    <ul class="reasons">${p.reasons.map(r => `<li>${esc(r.detail)}</li>`).join("")}</ul>`;
+  if (p.category_mapped_from) html += `<p class="muted">Category "${esc(p.category_mapped_from)}" was treated as ${esc(p.category)}.</p>`;
+  if (p.decision === "flag" && open) {
+    html += `<div class="question"><p><strong>Question from Finance</strong></p><p>${esc(open.question)}</p>
+      <form id="answer">${answerFields(p.reasons)}
+        <label>Your reply</label><textarea name="text" placeholder="Anything else Finance should know"></textarea>
+        <div class="actions"><button type="submit">Send answer</button><span class="muted" id="a-status"></span></div>
+      </form></div>`;
+  }
+  if (answered.length) {
+    html += `<p class="muted">Earlier questions</p>` + answered.map(f =>
+      `<div class="muted" style="margin-bottom:8px">Q: ${esc(f.question)}<br>A: ${esc(f.answer)}</div>`).join("");
+  }
+  $("result").innerHTML = html;
+  const form = $("answer");
+  if (form) form.addEventListener("submit", async e => {
+    e.preventDefault();
+    $("a-status").innerHTML = '<span class="spinner"></span> re-checking…';
+    try {
+      const updated = await api(`/api/expenses/${exp.id}/answer`, { method: "POST", body: new FormData(form) });
+      render(updated); loadMine();
+    } catch (err) { $("a-status").textContent = err.message; }
+  });
+}
+
+async function show(id) {
+  const exp = await api(`/api/expenses/${id}`);
+  render(exp);
+  if (exp.source === "portal") { bind(id); fillForm(exp.raw); }
+}
+
+async function loadMine() {
+  const me = $("me").value.trim();
+  if (!me) return;
+  const rows = await api(`/api/expenses?source=portal&employee=${encodeURIComponent(me)}`);
+  $("mine").innerHTML = rows.length ? rows.map(e => {
+    const p = e.latest || {};
+    return `<tr class="clickable ${e.id === shownId ? "selected" : ""}" data-id="${esc(e.id)}"><td>${esc(e.id)}</td><td>${esc(e.raw.date)}</td>
+      <td>${esc(e.raw.merchant)}</td><td class="num">${esc(money(p) || e.raw.amount)}</td><td>${badge(e.status)}</td></tr>`;
+  }).join("") : `<tr><td colspan="5" class="empty">No expenses yet.</td></tr>`;
+  document.querySelectorAll("#mine tr[data-id]").forEach(tr => tr.onclick = () => show(tr.dataset.id));
+}
+
+subscribe(ev => {
+  if (ev.type === "processing" && ev.expense_id === shownId) $("autosave").innerHTML = '<span class="spinner"></span> re-checking…';
+  if (ev.type === "decision") {
+    // Don't wipe an answer the employee is typing; their own submit re-renders anyway.
+    const typing = $("answer") && $("answer").contains(document.activeElement);
+    if (ev.expense_id === shownId && !typing) api(`/api/expenses/${shownId}`).then(render);
+    if (ev.payload.employee === $("me").value.trim()) loadMine();
+  }
+});
+loadMine();
+</script>
+</body>
+</html>
