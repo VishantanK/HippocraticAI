@@ -1,0 +1,37 @@
+id -- Expense id
+Multiple expenses per employee
+date formats
+categories are discreet
+merchants are free
+memo --> explanation / reason
+receipt --> bool
+approval_codes --> Maybe ingest from a lookup table?
+Missing category --> Ask 
+
+
+Decisions
+
+1. No weekend meals except clients
+2. Dinner $60, Lunch - 30, breakfast - 20 
+3. Split expenses
+4. client meals - No cap
+5. Hotel stays - $200 (Most cities), $350 (Tier 1 cities - NY, SF, Boston, LA, Seattle, Chicago, DC, London)
+6. Office, Software, Uber - Uncapped
+7. Entertainment (ONLY Client) - Uncapped 
+8. >25 --> receipt is needed (for all categories)
+9. Software needs approval code
+
+
+
+Flag 
+1. If receipt Missing
+2. If category is Missing
+3. Merchant is Missing
+4. Non dollar amounts (convert)
+
+Optional 
+1. Escalate prompt injections else reject
+
+
+
+

@@ -1,0 +1,11 @@
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+logs/
+.DS_Store
+.claude/settings.local.json
+expenses.db
+received_decisions.jsonl
+uploads/
