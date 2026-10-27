@@ -1,0 +1,4 @@
+{
+  "SW-2231": {"vendor": "AWS", "note": "cloud hosting"},
+  "SW-5510": {"vendor": "GitHub", "note": "seats"}
+}

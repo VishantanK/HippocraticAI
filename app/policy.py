@@ -1,0 +1,131 @@
+"""Pure, deterministic policy engine. No I/O, no LLM.
+
+evaluate(norm, signals, history) -> (decision, reasons)
+
+  norm     output of normalize.normalize() (plus "id", "employee")
+  signals  LLM-extracted facts: category, category_confidence, is_client, client_name, city
+  history  other normalised expenses by the same employee (for split detection)
+
+Order: rejects that can be determined from trusted fields first, then flags,
+then approve. Data we cannot trust (non-USD amount, unknown category) is a flag
+before any cap is applied, because a cap can't be applied to it.
+"""
+
+import datetime as dt
+
+from . import config
+
+
+def _reason(rule, detail):
+    return {"rule": rule, "detail": detail}
+
+
+def is_tier1(city_text):
+    t = f" {(city_text or '').lower()} "
+    return any(alias in t for aliases in config.TIER1_CITIES.values() for alias in aliases)
+
+
+def evaluate(norm, signals, history=(), approval_codes=None):
+    approval_codes = approval_codes if approval_codes is not None else config.load_approval_codes()
+    flags, rejects = [], []
+
+    category = signals.get("category")
+    is_client = bool(signals.get("is_client")) and bool((signals.get("client_name") or "").strip())
+    amount, currency = norm["amount"], norm["currency"]
+
+    # --- data we cannot evaluate -> flag -------------------------------------
+    if not norm["category_raw"]:
+        flags.append(_reason("missing_category", "No category was provided."))
+    elif category in (None, "unknown") or signals.get("category_confidence", 0) < 0.7:
+        flags.append(_reason("unknown_category",
+                             f"Category {norm['category_raw']!r} does not map to a policy category."))
+    if not norm["merchant"]:
+        flags.append(_reason("missing_merchant", "No merchant was provided."))
+    if amount is None:
+        flags.append(_reason("invalid_amount", "; ".join(norm["errors"]) or "Amount could not be read."))
+    elif currency != "USD":
+        flags.append(_reason("non_usd", f"Amount is in {currency} ({amount:.2f}); a USD amount is needed."))
+    elif amount <= 0:
+        flags.append(_reason("non_positive_amount", f"Amount {amount:.2f} is zero or negative."))
+    if norm["date"] is None:
+        flags.append(_reason("invalid_date", "Date is missing or unreadable."))
+
+    can_apply_caps = amount is not None and currency == "USD" and amount > 0 and \
+        category not in (None, "unknown") and not any(f["rule"] in ("missing_category", "unknown_category") for f in flags)
+
+    # --- hard rejects ---------------------------------------------------------
+    if can_apply_caps:
+        if category in config.MEALS and not is_client:
+            if norm["is_weekend"]:
+                rejects.append(_reason("weekend_meal",
+                                       f"{category} on a {norm['weekday']} with no client named."))
+            cap = config.MEAL_CAPS[category]
+            if amount > cap:
+                rejects.append(_reason("meal_over_cap",
+                                       f"{category} ${amount:.2f} exceeds the ${cap:.0f} cap (no client named)."))
+        if category == "Hotel":
+            location = " ".join(filter(None, [signals.get("city"), norm["merchant"], norm["memo"]]))
+            tier1 = is_tier1(location)
+            cap = config.HOTEL_CAP_TIER1 if tier1 else config.HOTEL_CAP
+            if amount > cap:
+                rejects.append(_reason("hotel_over_cap",
+                                       f"Hotel ${amount:.2f} exceeds the ${cap:.0f} "
+                                       f"{'Tier-1' if tier1 else 'standard'} nightly cap."))
+        if category == "Entertainment" and not is_client:
+            rejects.append(_reason("entertainment_not_client", "Entertainment is only reimbursable with a client."))
+
+    if rejects:
+        return "reject", rejects
+    if flags:
+        return "flag", flags
+
+    # --- needs a human --------------------------------------------------------
+    if amount > config.RECEIPT_THRESHOLD and not norm["receipt"]:
+        flags.append(_reason("missing_receipt", f"${amount:.2f} is over ${config.RECEIPT_THRESHOLD:.0f} and has no receipt."))
+    if category == "Software":
+        code = norm["approval_code"]
+        if not code:
+            flags.append(_reason("missing_approval_code", "Software purchases need an approval code."))
+        elif code not in approval_codes:
+            flags.append(_reason("unknown_approval_code", f"Approval code {code!r} is not on file."))
+    split = detect_split(norm, category, is_client, history)
+    if split:
+        flags.append(split)
+
+    if flags:
+        return "flag", flags
+    return "approve", [_reason("within_policy", _approve_detail(category, amount, is_client, signals))]
+
+
+def detect_split(norm, category, is_client, history):
+    """Same employee + merchant + meal category within 1 day, each under cap, combined over."""
+    if category not in config.MEALS or is_client or not norm["date"]:
+        return None
+    cap = config.MEAL_CAPS[category]
+    day = dt.date.fromisoformat(norm["date"])
+    merchant = norm["merchant"].lower()
+    for other in history:
+        if other.get("id") == norm.get("id") or not other.get("date"):
+            continue
+        if (other.get("merchant") or "").lower() != merchant or other.get("category") != category:
+            continue
+        if other.get("is_client") or other.get("currency") != "USD" or other.get("amount") is None:
+            continue
+        if abs((dt.date.fromisoformat(other["date"]) - day).days) > 1:
+            continue
+        combined = norm["amount"] + other["amount"]
+        if norm["amount"] <= cap and other["amount"] <= cap and combined > cap:
+            return _reason("possible_split",
+                           f"Together with {other['id']} (${other['amount']:.2f}, {other['date']}) at the same merchant, "
+                           f"the total ${combined:.2f} exceeds the ${cap:.0f} {category} cap.")
+    return None
+
+
+def _approve_detail(category, amount, is_client, signals):
+    if category in config.MEALS or category == "Entertainment":
+        if is_client:
+            return f"Client {category.lower()} with {signals.get('client_name')}; no cap applies."
+        return f"{category} ${amount:.2f} within the ${config.MEAL_CAPS[category]:.0f} cap."
+    if category == "Hotel":
+        return f"Hotel ${amount:.2f} within the nightly cap."
+    return f"{category} is uncapped; receipt/approval requirements met."
