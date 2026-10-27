@@ -86,6 +86,7 @@ header: a retried request returns the first result instead of acting twice. Uplo
 - `followups`: question, answer, status (open / answered / superseded).
 
 Docs: `docs/` (requirements, ADRs, architecture), `ASSUMPTIONS.md`, `AGENTS.md`.
+Full code reference (every module and function, API, data model, tests): `docs/architecture-guide.pdf`.
 
 ---
 
