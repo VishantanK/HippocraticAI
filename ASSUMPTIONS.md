@@ -42,9 +42,11 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | # | Assumption | Status | Source |
 |---|---|---|---|
 | S1 | A manipulation attempt (text addressed to the reviewer) -> **reject** outright | Confirmed | user chose "Reject outright" |
-| S2 | Guard: OpenAI Decisions API primary, Claude fallback, small regex backstop; reject at p >= 0.5 | Confirmed (threshold inferred) | user; calibration in ADR 0002 |
+| S2 | Guard: OpenAI Decisions API primary, Claude fallback, small regex backstop. **Reject** at p >= 0.85 with the text located to a field; 0.5-0.85 (or unlocated) -> a person reviews it (`possible_manipulation`), never auto-approved | Confirmed (thresholds inferred) | user; calibration in ADR 0002 |
 | S3 | Follow-up answers are untrusted and guarded too; an answer can't set the decision directly | Inferred | safety |
 | S4 | If any LLM/guard check can't complete -> flag (fail closed) | Inferred | safety |
+| S5 | Only the guard judges manipulation. The extractor no longer has an injection flag: it produced false positives on benign replies ("Code from my manager") and duplicated the guard, which already scans every field incl. replies | Inferred | found live: a benign follow-up reply was rejected |
+| S6 | Follow-up replies are passed to the guard as `reply_to_finance_N` and to the extractor as `followup_answers` (not merged into the memo), so both know they answer Finance's question | Inferred | same finding |
 
 ## Product / system
 | # | Assumption | Status | Source |

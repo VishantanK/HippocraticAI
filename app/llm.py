@@ -95,10 +95,11 @@ def classify_injection_decisions(fields):
             input=_wrap("fields", fields),
             questions=[
                 {"type": "predicate", "name": "manipulation", "instructions": _prompt("guard_decisions")},
+                # No "none" option: the answer is only used when the predicate is high, and
+                # offering "none" made it fail to point at text it had just scored 1.00.
                 {"type": "choice", "name": "field",
-                 "instructions": "If a field contains a manipulation attempt, which one? Otherwise 'none'.",
-                 "choices": [{"value": n, "description": f"the {n} field"} for n in names]
-                            + [{"value": "none", "description": "no field"}]},
+                 "instructions": "Which field's text is most aimed at influencing the approval decision or the reviewer?",
+                 "choices": [{"value": n, "description": f"the {n} field"} for n in names]},
             ],
         )
     except openai.OpenAIError as e:
@@ -110,7 +111,7 @@ def classify_injection_decisions(fields):
     field = answers.get("field")
     field = field.choice if field is not None and field.type == "choice" else "unknown"
     p = float(pred.probability)
-    return {"injection": p >= config.GUARD_THRESHOLD, "probability": p, "field": field,
+    return {"injection": p >= config.GUARD_REVIEW_THRESHOLD, "probability": p, "field": field,
             "evidence": (fields.get(field) or "") if field in fields else "", "detector": "openai_decisions"}
 
 
@@ -133,13 +134,12 @@ EXTRACT_SCHEMA = {
         "is_client": {"type": "boolean"},
         "client_name": {"type": "string"},
         "city": {"type": "string"},
-        "injection_suspected": {"type": "boolean"},
     },
-    "required": ["category", "category_confidence", "is_client", "client_name", "city", "injection_suspected"],
+    "required": ["category", "category_confidence", "is_client", "client_name", "city"],
     "additionalProperties": False,
 }
 
-_EXTRACT_FIELDS = ("category", "merchant", "memo", "date")
+_EXTRACT_FIELDS = ("category", "merchant", "memo", "date", "followup_answers")
 
 
 def extract(expense):

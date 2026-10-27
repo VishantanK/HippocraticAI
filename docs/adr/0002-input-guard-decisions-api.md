@@ -8,9 +8,13 @@ Employees control the memo, merchant, category and follow-up answers. EXP-2018 t
 
 ## Decision
 `app/guard.py` runs first: schema/length checks, Unicode sanitising, then an LLM screen. The
-primary screen is a predicate question to the OpenAI Decisions API (`gpt-6-luna`), rejecting at
-p >= 0.5 (`GUARD_THRESHOLD`). If that errors, a Claude structured-output screen takes over.
-A 4-pattern regex backstop runs when the screen says clean. Both screens down -> flag.
+primary screen is a predicate question to the OpenAI Decisions API (`gpt-6-luna`) plus a choice
+question naming the field. Reject needs p >= 0.85 and a located field (`GUARD_REJECT_THRESHOLD`);
+0.5-0.85 or unlocated means a person reviews it (`GUARD_REVIEW_THRESHOLD`), never an auto-approve.
+If that errors, a Claude structured-output screen takes over. A 4-pattern regex backstop runs when
+the screen finds nothing. Both screens down -> flag. Follow-up replies are labelled
+`reply_to_finance_N` so the screen knows they answer Finance's question. The guard is the only
+manipulation detector (the extractor's own injection flag was removed: false positives).
 
 ## Alternatives considered
 - Long hardcoded regex list: brittle, misses paraphrases. Rejected (kept a tiny backstop).
@@ -19,4 +23,7 @@ A 4-pattern regex backstop runs when the screen says clean. Both screens down ->
 
 ## Consequences
 Calibration: 37 benign expenses p=0.00, decoy "approved by client contract" 0.05, all attacks 1.00.
+Revision (live finding): with replies unlabelled, "Code from my manager" scored 0.01 and 0.70 on two
+runs, so a single 0.5 cut-off could reject a benign reply. With labels it scores 0.00 on every run.
+A "none" field option also failed to locate attacks scored 1.00, so it was removed.
 Two providers add a dependency (`openai`). Watch: false rejects on unusual memos.

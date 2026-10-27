@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(ROOT, ".env"))
 
-POLICY_VERSION = "2026-10-27.2"
-PROMPT_VERSION = "v1"
+POLICY_VERSION = "2026-10-27.3"
+PROMPT_VERSION = "v2"
 
 DECISIONS_ENDPOINT = os.getenv("DECISIONS_ENDPOINT", "http://localhost:8000/decisions")
 DB_PATH = os.getenv("EXPENSE_DB", os.path.join(ROOT, "expenses.db"))
@@ -18,9 +18,11 @@ LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-5-5")  # extraction + question 
 # Guard screen: OpenAI Decisions API (probability), Claude screen as fallback.
 GUARD_DECISIONS_MODEL = os.getenv("GUARD_DECISIONS_MODEL", "gpt-6-luna")
 GUARD_FALLBACK_MODEL = os.getenv("GUARD_FALLBACK_MODEL", LLM_MODEL)
-# Reject when P(manipulation) >= threshold. Low on purpose: a missed manipulation is
-# worse than a false reject (which a human can override). Calibrated in tests/eval.
-GUARD_THRESHOLD = float(os.getenv("GUARD_THRESHOLD", "0.5"))
+# Two bands on P(manipulation). Reject needs high confidence AND a located field;
+# the band below that sends the expense to a person instead of approving it.
+# Calibration: benign <= 0.05 (one borderline reply 0.01-0.70 across runs), attacks 1.00.
+GUARD_REVIEW_THRESHOLD = float(os.getenv("GUARD_REVIEW_THRESHOLD", "0.5"))
+GUARD_REJECT_THRESHOLD = float(os.getenv("GUARD_REJECT_THRESHOLD", "0.85"))
 LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "30"))
 LLM_DISABLED = os.getenv("LLM_DISABLED") == "1"  # tests / offline: forces fail-closed paths
 

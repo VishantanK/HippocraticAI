@@ -55,10 +55,8 @@ def _exact_category(raw):
     return None
 
 
-def _effective_memo(expense, answers):
-    texts = [a["text"] for a in answers or [] if a.get("text")]
-    memo = expense.get("memo") or ""
-    return " | ".join([memo] + [f"Employee follow-up: {t}" for t in texts]).strip(" |")
+def _followup_texts(answers):
+    return [a["text"] for a in answers or [] if a.get("text")]
 
 
 def evaluate(raw, answers=None, history=(), use_llm=True, extract_fn=None, guard_fn=None):
@@ -72,13 +70,13 @@ def evaluate(raw, answers=None, history=(), use_llm=True, extract_fn=None, guard
     for a in answers or []:
         merged.update({k: v for k, v in (a.get("fields") or {}).items()
                        if k in guard.ALLOWED_FIELDS and v not in (None, "")})
-    answer_text = {f"answer_{i + 1}": a["text"] for i, a in enumerate(answers or []) if a.get("text")}
+    answer_text = {f"reply_to_finance_{i + 1}": a["text"] for i, a in enumerate(answers or []) if a.get("text")}
 
     # 1. input guard ---------------------------------------------------------
     classifier = guard_fn if guard_fn is not None else (llm.classify_injection if use_llm else None)
     g = guard.run_guard(merged, extra_text=answer_text, llm_classifier=classifier)
     clean = g["clean"]
-    signals = {"guard": {k: g[k] for k in ("schema_issues", "manipulation", "guard_error", "screen")}}
+    signals = {"guard": {k: g[k] for k in ("schema_issues", "manipulation", "guard_error", "screen", "suspect")}}
     base = {"id": raw.get("id"), "employee": clean.get("employee")}
 
     if g["manipulation"]:
@@ -100,11 +98,13 @@ def evaluate(raw, answers=None, history=(), use_llm=True, extract_fn=None, guard
     try:
         if not use_llm and extract_fn is None:
             raise llm.LLMError("LLM disabled")
-        ex = (extract_fn or llm.extract)(dict(clean, memo=_effective_memo(clean, answers)))
+        # Replies go in their own field: they are addressed to Finance by design, and
+        # mixing them into the memo made the extractor read them as reviewer-directed.
+        ex = (extract_fn or llm.extract)(dict(clean, followup_answers=_followup_texts(answers)))
     except llm.LLMError as e:
         llm_error = str(e)
         ex = {"category": exact or "unknown", "category_confidence": 1.0 if exact else 0.0,
-              "is_client": False, "client_name": "", "city": "", "injection_suspected": False}
+              "is_client": False, "client_name": "", "city": ""}
     if exact:  # never let the model re-map an exact category
         ex["category"], ex["category_confidence"] = exact, 1.0
     if not norm["category_raw"]:
@@ -118,14 +118,14 @@ def evaluate(raw, answers=None, history=(), use_llm=True, extract_fn=None, guard
     norm["is_client"] = bool(ex["is_client"] and ex["client_name"].strip())
     norm["client_name"] = ex["client_name"] if norm["is_client"] else ""
 
-    if ex.get("injection_suspected"):
-        reasons = [{"rule": "suspected_manipulation",
-                    "detail": "The extraction model detected text addressed to the reviewer."}]
-        return dict(base, decision="reject", reasons=reasons, normalized=norm, signals=signals,
-                    suspected_manipulation=True)
-
     # 4. policy ----------------------------------------------------------------
     decision, reasons = policy.evaluate(norm, ex, history)
+
+    # A borderline guard score can't reject (that needs a confident, located hit), but it
+    # does stop an automatic approval.
+    if g["suspect"] and decision == "approve":
+        decision, reasons = "flag", [{"rule": "possible_manipulation",
+                                      "detail": "Some wording may be aimed at the reviewer; a person should check it."}]
 
     # A follow-up answer may correct data, but it can't talk its way out of a duplicate:
     # the original submission is checked too, so only Finance can clear it.
@@ -164,6 +164,7 @@ def _template_question(raw, reasons):
         "possible_duplicate": "confirm whether this is a separate purchase or a duplicate of an expense you already submitted",
         "edited_after_review": "note that Finance will review your changes",
         "check_failed": "note that Finance will review this expense",
+        "possible_manipulation": "note that Finance will review this expense",
         "high_amount_review": "attach the itemized receipt and a short business justification for this amount",
         "future_date": "confirm the date of the expense",
     }

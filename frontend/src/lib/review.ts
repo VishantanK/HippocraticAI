@@ -2,7 +2,7 @@ import type { ExpenseSummary } from "./types";
 
 /** Reasons only a person can resolve; the employee can't fix these by replying. */
 const HUMAN_ONLY = new Set(["possible_duplicate", "high_amount_review", "edited_after_review", "check_failed",
-  "llm_unavailable", "guard_unavailable", "possible_split"]);
+  "llm_unavailable", "guard_unavailable", "possible_split", "possible_manipulation"]);
 
 export function readyForDecision(e: ExpenseSummary) {
   if (e.status === "error") return true;

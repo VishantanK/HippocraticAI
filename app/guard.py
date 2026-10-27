@@ -14,6 +14,8 @@ and the expense is rejected (Finance policy: reject outright).
 import re
 import unicodedata
 
+from . import config
+
 ALLOWED_FIELDS = {
     "id": str, "employee": str, "date": str, "category": str, "merchant": str,
     "amount": (int, float, str), "memo": str, "receipt": bool, "approval_code": str,
@@ -106,7 +108,8 @@ def scan_fields(fields):
 
 def run_guard(expense, extra_text=None, llm_classifier=None):
     """Full guard. Returns dict:
-        {clean, schema_issues, manipulation: [hits], guard_error: str|None}
+        {clean, schema_issues, manipulation: [hits] (-> reject), suspect: hit|None (-> no auto-approve),
+         guard_error: str|None, screen}
 
     extra_text: additional untrusted text to scan (e.g. follow-up answers).
     llm_classifier: callable(fields) -> {"injection", "probability", "field", "evidence", "detector"}
@@ -115,18 +118,26 @@ def run_guard(expense, extra_text=None, llm_classifier=None):
     fields = {k: clean.get(k) for k in TEXT_FIELDS}
     for k, v in (extra_text or {}).items():
         fields[k] = sanitize_text(v)[: MAX_LEN["answer"]] if isinstance(v, str) else v
-    guard_error, screen = None, None
+    guard_error, screen, suspect = None, None, None
     hits = []
     if llm_classifier is not None:
         try:
-            res = llm_classifier({k: v for k, v in fields.items() if v})
+            present = {k: v for k, v in fields.items() if v}
+            res = llm_classifier(present)
             screen = {k: res.get(k) for k in ("detector", "probability", "field", "primary_error")}
             if res.get("injection"):
-                hits.append({"field": res.get("field") or "unknown", "evidence": res.get("evidence") or "",
-                             "detector": res.get("detector", "llm"), "probability": res.get("probability")})
+                p = res.get("probability")
+                hit = {"field": res.get("field") or "unknown", "evidence": res.get("evidence") or "",
+                       "detector": res.get("detector", "llm"), "probability": p}
+                # Reject only when confident AND the screen can point at the text. Otherwise a
+                # person looks at it: borderline scores vary run to run on the same reply.
+                if (p is None or p >= config.GUARD_REJECT_THRESHOLD) and hit["field"] in present:
+                    hits.append(hit)
+                else:
+                    suspect = hit
         except Exception as e:  # fail closed: caller turns this into a flag
             guard_error = f"guard classifier unavailable: {e}"
     if not hits:
         hits = scan_fields(fields)
     return {"clean": clean, "schema_issues": schema_issues, "manipulation": hits,
-            "guard_error": guard_error, "screen": screen}
+            "guard_error": guard_error, "screen": screen, "suspect": None if hits else suspect}

@@ -68,6 +68,7 @@ export const RULE_LABEL: Record<string, string> = {
   human_review: "Finance decision",
   edited_after_review: "Edited after review",
   check_failed: "Automated check failed",
+  possible_manipulation: "Wording needs a look",
 };
 
 export const CATEGORIES = ["Breakfast", "Lunch", "Dinner", "Hotel", "Office", "Software", "Uber", "Taxi", "Airfare", "Entertainment"];

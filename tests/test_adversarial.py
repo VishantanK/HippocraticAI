@@ -32,9 +32,16 @@ def test_extra_decision_key_ignored():
     assert any("decision" in i for i in r["signals"]["guard"]["schema_issues"])
 
 
-def test_extractor_injection_signal_rejects():
-    r = ev(expense(), ext=extractor(injection=True))
-    assert r["decision"] == "reject"
+def test_followup_answers_reach_extractor_separately():
+    seen = {}
+    base = extractor()
+
+    def spy(e):
+        seen.update(e)
+        return base(e)
+
+    ev(expense(memo="team plan"), answers=[{"text": "Code from my manager"}], ext=spy)
+    assert seen["memo"] == "team plan" and seen["followup_answers"] == ["Code from my manager"]
 
 
 def test_team_dinner_is_not_client():
@@ -79,3 +86,10 @@ def test_answer_fills_gap():
     raw = expense(category="Software", amount=16)
     assert ev(raw)["decision"] == "flag"
     assert ev(raw, answers=[{"text": "", "fields": {"approval_code": "SW-5510"}}])["decision"] == "approve"
+
+
+def test_guard_suspicion_blocks_approval_only():
+    suspect = lambda f: {"injection": True, "probability": 0.7, "field": "memo", "evidence": "x", "detector": "openai_decisions"}
+    r = ev(expense(amount=10), screen=suspect)
+    assert r["decision"] == "flag" and r["reasons"][0]["rule"] == "possible_manipulation"
+    assert ev(expense(amount=50), screen=suspect)["decision"] == "reject"   # policy reject stands
