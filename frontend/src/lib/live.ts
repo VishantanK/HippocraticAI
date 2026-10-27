@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export interface LiveEvent { type: "queued" | "processing" | "decision" | "error"; expense_id: string; payload?: unknown }
+export interface LiveEvent { type: "queued" | "processing" | "decision" | "error" | "delivery"; expense_id: string; payload?: unknown }
 
 type Listener = (e: LiveEvent) => void;
 const listeners = new Set<Listener>();

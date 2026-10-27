@@ -6,6 +6,7 @@ import EmployeeHome from "./pages/employee/EmployeeHome";
 import EmployeeExpense from "./pages/employee/EmployeeExpense";
 import NewExpense from "./pages/employee/NewExpense";
 import AllExpenses from "./pages/finance/AllExpenses";
+import Delivery from "./pages/finance/Delivery";
 import FinanceExpense from "./pages/finance/FinanceExpense";
 import Overview from "./pages/finance/Overview";
 import Queue from "./pages/finance/Queue";
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="queue" element={<Queue />} />
         <Route path="expenses" element={<AllExpenses />} />
         <Route path="expenses/:id" element={<FinanceExpense />} />
+        <Route path="delivery" element={<Delivery />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

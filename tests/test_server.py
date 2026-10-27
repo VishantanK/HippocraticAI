@@ -247,6 +247,22 @@ def test_csv_cell_guard():
     assert _cell("-5") == "'-5" and _cell(-5.0) == -5.0 and _cell("Nobu") == "Nobu" and _cell(None) == ""
 
 
+def test_delivery_panel_endpoints(monkeypatch):
+    from app import outbox
+    e = submit(dict(EXP, merchant="Trello", employee="Delivery Person"))
+    store.record_post(e["id"], 1, "dead", "connection refused")
+    code, rows = call("GET", "/api/deliveries")
+    assert code == 200 and any(r["expense_id"] == e["id"] and r["post_status"] == "dead" for r in rows)
+    code, res = call("POST", f"/api/deliveries/{e['id']}/1/retry")
+    assert code == 200 and res["post_status"] == "sent" and POSTED[-1]["decision_key"] == f"{e['id']}:1"
+    code, _ = call("POST", f"/api/deliveries/{e['id']}/1/retry")
+    assert code == 409                                               # already delivered
+    store.record_post(e["id"], 1, "dead", "x")
+    code, res = call("POST", "/api/deliveries/retry-all")
+    assert code == 200 and res["sent"] >= 1
+    assert all(r["expense_id"] != e["id"] for r in call("GET", "/api/deliveries")[1])
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")

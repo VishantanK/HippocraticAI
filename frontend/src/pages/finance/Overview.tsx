@@ -8,7 +8,7 @@ import { ago } from "../../lib/format";
 import { useData } from "../../lib/useData";
 
 export default function Overview() {
-  const { data: s, error, loading, refresh } = useData(api.stats, [], (e) => e.type === "decision");
+  const { data: s, error, loading, refresh } = useData(api.stats, [], (e) => e.type === "decision" || e.type === "delivery");
   if (loading && !s) return <Loading label="Loading overview" />;
   if (error || !s) return <ErrorState message={error ?? "No data"} onRetry={refresh} />;
 
@@ -47,13 +47,14 @@ export default function Overview() {
             </Link>
           )}
           {(s.post.dead > 0 || s.post.failed > 0) && (
-            <div className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-sm">
+            <Link to="/finance/delivery" className="flex items-center gap-3 rounded-lg border border-line bg-panel px-4 py-3 text-sm hover:border-ink-2">
               <AlertTriangle size={18} className="text-reject" aria-hidden />
               <span>
                 {s.post.failed > 0 && <>{s.post.failed} decision{s.post.failed === 1 ? " is" : "s are"} being retried to the payments system. </>}
                 {s.post.dead > 0 && <strong>{s.post.dead} could not be delivered after 8 attempts.</strong>}
               </span>
-            </div>
+              <span className="ml-auto font-semibold text-reject">Review</span>
+            </Link>
           )}
         </div>
       )}

@@ -17,7 +17,7 @@ the UI over SSE. Portal work runs in background jobs.
 | app/policy.py | pure rules -> decision + reasons (caps, receipts, codes, split, duplicate, high amount, future/stale date, placeholders, multi-night hotel) |
 | app/pipeline.py | evaluate (pure) + process/process_stored (locks, store, notify) + human override + failure flag |
 | app/jobs.py | background decision workers; per-id coalescing; startup recovery |
-| app/outbox.py | atomic claim, retry with backoff, idempotency key, supersede |
+| app/outbox.py | atomic claim, retry with backoff, idempotency key, supersede; Finance retry (one attempt, latest revision only) |
 | app/store.py | SQLite (WAL): expenses, decisions, followups; filtered/paged list (`query_expenses`, whitelisted sorts); stats |
 | app/server.py | FastAPI REST + SSE; serves frontend/dist with SPA fallback |
 | frontend/ | React SPA: /employee/*, /finance/* |

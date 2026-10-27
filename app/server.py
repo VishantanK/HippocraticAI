@@ -148,6 +148,29 @@ def get_policy():
     }
 
 
+@app.get("/api/deliveries")
+def list_deliveries():
+    """Latest decisions that haven't reached downstream: 'failed' (retrying) and 'dead' (gave up)."""
+    return store.delivery_problems()
+
+
+# Registered before the per-row route so "retry-all" isn't read as an expense id.
+@app.post("/api/deliveries/retry-all")
+def retry_all_deliveries():
+    result = outbox.retry_all()
+    pipeline.notify({"type": "delivery", "expense_id": "*"})
+    return result
+
+
+@app.post("/api/deliveries/{expense_id}/{revision}/retry")
+def retry_delivery(expense_id: str, revision: int):
+    status = outbox.retry(expense_id, revision)
+    if status is None:
+        raise HTTPException(409, "nothing to retry: already delivered, or a newer decision replaced it")
+    pipeline.notify({"type": "delivery", "expense_id": expense_id})
+    return {"expense_id": expense_id, "revision": revision, "post_status": status}
+
+
 @app.get("/api/employees")
 def get_employees():
     return store.employees()

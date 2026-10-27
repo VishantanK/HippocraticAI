@@ -222,6 +222,38 @@ def claim_post(expense_id, revision):
         return {"payload": json.loads(r["payload_json"]), "attempts": r["post_attempts"]}
 
 
+def delivery_problems():
+    """Latest decisions that haven't reached downstream ('failed' = retrying, 'dead' = gave up)."""
+    with _lock:
+        return [_row(r) for r in conn().execute(
+            "SELECT d.expense_id, d.revision, d.decision, d.decided_by, d.decided_at, d.post_status,"
+            " d.post_attempts, d.last_error, d.next_attempt_at, e.employee FROM decisions d"
+            " JOIN expenses e ON e.id=d.expense_id WHERE d.post_status IN ('failed','dead')"
+            " AND d.revision=(SELECT MAX(revision) FROM decisions WHERE expense_id=d.expense_id)"
+            " ORDER BY d.post_status='dead' DESC, d.rowid")]
+
+
+def revive_post(expense_id, revision=None):
+    """Make dead rows deliverable again (latest revision only); revision=None revives all of them."""
+    q = ("UPDATE decisions SET post_status='failed', next_attempt_at=NULL WHERE post_status='dead'"
+         " AND revision=(SELECT MAX(revision) FROM decisions d2 WHERE d2.expense_id=decisions.expense_id)")
+    args = []
+    if revision is not None:
+        q += " AND expense_id=? AND revision=?"
+        args = [expense_id, revision]
+    with _lock:
+        n = conn().execute(q, args).rowcount
+        conn().commit()
+        return n
+
+
+def post_status(expense_id, revision):
+    with _lock:
+        r = conn().execute("SELECT post_status FROM decisions WHERE expense_id=? AND revision=?",
+                           (expense_id, revision)).fetchone()
+        return r[0] if r else None
+
+
 def reset_stale_sending():
     """Rows left 'sending' by a crashed process go back to the retry queue."""
     with _lock:
@@ -363,6 +395,11 @@ def stats():
                       " ON d.expense_id=e.id AND d.revision=(SELECT MAX(revision) FROM decisions WHERE expense_id=e.id)")]
         post = {k: 0 for k in ("pending", "sent", "failed", "dead")}
         post.update({r[0]: r[1] for r in c.execute("SELECT post_status, COUNT(*) FROM decisions GROUP BY post_status")})
+        # An old revision that failed doesn't matter once a newer one exists: count the latest only.
+        post.update({"failed": 0, "dead": 0})
+        post.update({r[0]: r[1] for r in c.execute(
+            "SELECT post_status, COUNT(*) FROM decisions d WHERE post_status IN ('failed','dead')"
+            " AND revision=(SELECT MAX(revision) FROM decisions WHERE expense_id=d.expense_id) GROUP BY post_status")})
         open_q = c.execute("SELECT COUNT(*) FROM followups WHERE status='open'").fetchone()[0]
         answered = c.execute(
             "SELECT COUNT(DISTINCT f.expense_id) FROM followups f JOIN expenses e ON e.id=f.expense_id"

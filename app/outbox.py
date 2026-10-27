@@ -73,6 +73,23 @@ def flush():
     return {"sent": sent, "failed": before - sent}
 
 
+def retry(expense_id, revision):
+    """Finance's "Retry now": one immediate attempt, ignoring backoff. A dead row gets just this
+    attempt (it goes straight back to dead if it fails). Only the latest revision is retried.
+    Returns the resulting post_status, or None if there was nothing to retry."""
+    store.revive_post(expense_id, revision)  # no-op unless it is the latest revision and dead
+    if store.post_status(expense_id, revision) not in ("pending", "failed"):
+        return None  # sent, superseded, still dead (an older revision), or unknown
+    _attempt(expense_id, revision)  # claims atomically, so the worker can't send it twice
+    return store.post_status(expense_id, revision)
+
+
+def retry_all():
+    """Revive every dead latest decision and try all undelivered ones now."""
+    store.revive_post(None)
+    return flush()
+
+
 def _loop():
     while not _stop.wait(POLL_S):
         try:

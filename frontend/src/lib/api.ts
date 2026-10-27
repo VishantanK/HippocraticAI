@@ -1,4 +1,4 @@
-import type { ExpenseDetail, ExpenseInput, ExpenseSummary, Policy, Stats } from "./types";
+import type { Delivery, ExpenseDetail, ExpenseInput, ExpenseSummary, Policy, Stats } from "./types";
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -45,4 +45,8 @@ export const api = {
   stats: () => request<Stats>("/api/stats"),
   employees: () => request<string[]>("/api/employees"),
   policy: () => request<Policy>("/api/policy"),
+  deliveries: () => request<Delivery[]>("/api/deliveries"),
+  retryDelivery: (id: string, revision: number) =>
+    request<{ post_status: string }>(`/api/deliveries/${encodeURIComponent(id)}/${revision}/retry`, { method: "POST" }),
+  retryAllDeliveries: () => request<{ sent: number; failed: number }>("/api/deliveries/retry-all", { method: "POST" }),
 };

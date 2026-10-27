@@ -1,4 +1,4 @@
-import { Inbox, LayoutDashboard, Rows3 } from "lucide-react";
+import { Inbox, LayoutDashboard, Rows3, Send } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { api } from "../lib/api";
 import { useData } from "../lib/useData";
@@ -9,8 +9,9 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2.5 rounded px-3 py-2 text-sm font-medium ${isActive ? "bg-sunk text-ink" : "text-ink-2 hover:bg-sunk/60 hover:text-ink"}`;
 
 export function FinanceLayout() {
-  const { data: stats } = useData(api.stats, [], (e) => e.type === "decision");
+  const { data: stats } = useData(api.stats, [], (e) => e.type === "decision" || e.type === "delivery");
   const needsDecision = stats ? stats.by_status.flag ?? 0 : null;
+  const undelivered = stats ? stats.post.dead + stats.post.failed : null;
   return (
     <div className="min-h-screen md:grid md:grid-cols-[220px_1fr]">
       <aside className="border-b border-line bg-panel md:sticky md:top-0 md:h-screen md:border-b-0 md:border-r">
@@ -25,6 +26,10 @@ export function FinanceLayout() {
             {needsDecision ? <span className="ml-auto rounded-full bg-flag px-2 text-xs font-semibold text-white">{needsDecision}</span> : null}
           </NavLink>
           <NavLink to="/finance/expenses" className={link}><Rows3 size={16} aria-hidden />All expenses</NavLink>
+          <NavLink to="/finance/delivery" className={link}>
+            <Send size={16} aria-hidden />Delivery
+            {undelivered ? <span className="ml-auto rounded-full bg-reject px-2 text-xs font-semibold text-white">{undelivered}</span> : null}
+          </NavLink>
         </nav>
         <div className="hidden px-5 md:absolute md:bottom-4 md:block"><LiveDot /></div>
       </aside>

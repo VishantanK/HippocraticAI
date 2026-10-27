@@ -74,3 +74,64 @@ def test_idempotency_header(monkeypatch):
     monkeypatch.setattr(poster.urllib.request, "urlopen", fake_urlopen)
     assert poster.post_decision({"id": "X", "decision_key": "X:2"})
     assert seen.get("Idempotency-key") == "X:2"
+
+
+# --- Finance's delivery panel: list problems, retry one, retry all ---------------------------
+
+def _kill(eid, monkeypatch):
+    monkeypatch.setattr(poster, "post_decision", lambda d: False)
+    pipeline.process(expense(id=eid), source="batch")
+    for n in range(1, outbox.MAX_ATTEMPTS + 1):
+        outbox.run_due(now=later(n))
+    assert post_row(eid)["post_status"] == "dead"
+
+
+def test_problems_lists_latest_failed_and_dead(db, monkeypatch):
+    _kill("D-1", monkeypatch)
+    pipeline.process(expense(id="D-2"), source="batch")           # failed once, not dead
+    monkeypatch.setattr(poster, "post_decision", lambda d: True)
+    pipeline.process(expense(id="D-3"), source="batch")           # sent
+    rows = {r["expense_id"]: r for r in store.delivery_problems()}
+    assert set(rows) == {"D-1", "D-2"}
+    assert rows["D-1"]["post_status"] == "dead" and rows["D-1"]["post_attempts"] == outbox.MAX_ATTEMPTS
+    assert rows["D-1"]["last_error"] and rows["D-1"]["employee"] is not None
+
+
+def test_retry_dead_delivers_exactly_once(db, monkeypatch):
+    _kill("D-1", monkeypatch)
+    calls = []
+    monkeypatch.setattr(poster, "post_decision", lambda d: calls.append(d["decision_key"]) or True)
+    assert outbox.retry("D-1", 1) == "sent"
+    assert outbox.retry("D-1", 1) is None                          # already sent: nothing to do
+    assert calls == ["D-1:1"] and post_row("D-1")["post_status"] == "sent"
+
+
+def test_retry_that_fails_stays_dead(db, monkeypatch):
+    _kill("D-1", monkeypatch)
+    assert outbox.retry("D-1", 1) == "dead"
+
+
+def test_retry_refuses_superseded_revision(db, monkeypatch):
+    _kill("D-1", monkeypatch)
+    pipeline.human_override("D-1", "reject", "x")                 # rev 2 (fails: poster still down)
+    calls = []
+    monkeypatch.setattr(poster, "post_decision", lambda d: calls.append(d["decision_key"]) or True)
+    assert outbox.retry("D-1", 1) is None and calls == []
+    assert outbox.retry("D-1", 2) == "sent" and calls == ["D-1:2"]
+
+
+def test_retry_all(db, monkeypatch):
+    _kill("D-1", monkeypatch)
+    pipeline.process(expense(id="D-2"), source="batch")
+    monkeypatch.setattr(poster, "post_decision", lambda d: True)
+    assert outbox.retry_all() == {"sent": 2, "failed": 0}
+    assert store.delivery_problems() == []
+
+
+def test_stats_count_only_latest_undelivered(db, monkeypatch):
+    _kill("D-1", monkeypatch)                                       # rev 1 dead
+    monkeypatch.setattr(poster, "post_decision", lambda d: True)
+    pipeline.human_override("D-1", "reject", "x")                  # rev 2 sent: rev 1 no longer matters
+    s = store.stats()
+    assert s["post"]["dead"] == 0 and s["post"]["failed"] == 0
+    assert len(store.delivery_problems()) == 0

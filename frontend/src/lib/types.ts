@@ -122,3 +122,17 @@ export interface Policy {
   high_amount_review: number;
   stale_months: number;
 }
+
+/** GET /api/deliveries: a latest decision the payments system hasn't received. */
+export interface Delivery {
+  expense_id: string;
+  revision: number;
+  decision: Decision;
+  decided_by: "system" | "human";
+  decided_at: string;
+  post_status: "failed" | "dead";
+  post_attempts: number;
+  last_error: string | null;
+  next_attempt_at: string | null;
+  employee: string | null;
+}
