@@ -40,7 +40,7 @@ export default function Overview() {
       {(s.manipulation > 0 || s.post.dead > 0 || s.post.failed > 0) && (
         <div className="space-y-2">
           {s.manipulation > 0 && (
-            <Link to="/finance/expenses?filter=manipulation" className="flex items-center gap-3 rounded-lg border border-reject/40 bg-reject-tint px-4 py-3 text-sm hover:border-reject">
+            <Link to="/finance/expenses?manipulation=true" className="flex items-center gap-3 rounded-lg border border-reject/40 bg-reject-tint px-4 py-3 text-sm hover:border-reject">
               <ShieldAlert size={18} className="text-reject" aria-hidden />
               <span><strong>{s.manipulation} expense{s.manipulation === 1 ? "" : "s"}</strong> tried to instruct the reviewer and {s.manipulation === 1 ? "was" : "were"} rejected automatically.</span>
               <span className="ml-auto font-semibold text-reject">Review</span>

@@ -15,7 +15,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -153,9 +153,27 @@ def get_employees():
     return store.employees()
 
 
+def _filters(status, manipulation, source, employee, category, date_from, date_to,
+             amount_min, amount_max, rule, delivery, q):
+    return {"status": status, "manipulation": manipulation, "source": source, "employee": employee,
+            "category": category, "date_from": date_from, "date_to": date_to, "amount_min": amount_min,
+            "amount_max": amount_max, "rule": rule, "delivery": delivery, "q": q}
+
+
 @app.get("/api/expenses")
-def list_expenses(source: str | None = None, employee: str | None = None):
-    return store.list_expenses(source, employee)
+def list_expenses(
+    response: Response, status: str | None = None, manipulation: bool = False, source: str | None = None,
+    employee: str | None = None, category: str | None = None, date_from: str | None = None,
+    date_to: str | None = None, amount_min: float | None = None, amount_max: float | None = None,
+    rule: str | None = None, delivery: str | None = None, q: str | None = None,
+    sort: str = "updated", dir: str = "desc", limit: int | None = None, offset: int = 0,
+):
+    """Latest state of each expense. Filters combine; with `limit`, X-Total-Count has the full count."""
+    f = _filters(status, manipulation, source, employee, category, date_from, date_to,
+                 amount_min, amount_max, rule, delivery, q)
+    rows, total = store.query_expenses(f, sort, dir, limit, offset)
+    response.headers["X-Total-Count"] = str(total)
+    return rows
 
 
 @app.get("/api/expenses/{expense_id}")

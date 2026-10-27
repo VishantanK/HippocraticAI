@@ -71,6 +71,11 @@ export const RULE_LABEL: Record<string, string> = {
   possible_manipulation: "Wording needs a look",
 };
 
+/** The policy's own categories (what the system maps everything to). */
+export const POLICY_CATEGORIES = ["Breakfast", "Lunch", "Dinner", "Hotel", "Office", "Software", "GroundTransport", "Airfare", "Entertainment"];
+
+export const categoryLabel = (c: string) => (c === "GroundTransport" ? "Ground transport" : c);
+
 export const CATEGORIES = ["Breakfast", "Lunch", "Dinner", "Hotel", "Office", "Software", "Uber", "Taxi", "Airfare", "Entertainment"];
 
 /** Which structured answer fields a flag needs, from its reason codes. */

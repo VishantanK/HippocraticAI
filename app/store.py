@@ -52,6 +52,13 @@ CREATE TABLE IF NOT EXISTS followups (
 );
 """
 
+# Indexes for Finance's filtered list (idempotent; applied on connect).
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_expenses_employee ON expenses(employee, updated_at);
+CREATE INDEX IF NOT EXISTS idx_expenses_status ON expenses(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_post ON decisions(post_status);
+"""
+
 # Columns added after v1; applied on connect if missing.
 MIGRATIONS = [
     ("decisions", "next_attempt_at", "TEXT"),
@@ -78,6 +85,7 @@ def conn():
                 cols = {r["name"] for r in _conn.execute(f"PRAGMA table_info({table})")}
                 if column not in cols:
                     _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ctype}")
+            _conn.executescript(INDEXES)
             _conn.commit()
         return _conn
 
@@ -268,20 +276,75 @@ def expense_detail(expense_id):
     return e
 
 
-def list_expenses(source=None, employee=None):
-    q = ("SELECT e.*, d.payload_json AS latest_json, d.post_status, d.decided_by FROM expenses e"
-         " LEFT JOIN decisions d ON d.expense_id=e.id AND d.revision=(SELECT MAX(revision) FROM decisions WHERE expense_id=e.id)"
-         " WHERE 1=1")
-    args = []
-    if source:
-        q += " AND e.source=?"
-        args.append(source)
-    if employee:
-        q += " AND e.employee=?"
-        args.append(employee)
-    q += " ORDER BY e.updated_at DESC"
+_LATEST = ("SELECT e.*, d.payload_json AS latest_json, d.post_status, d.decided_by FROM expenses e"
+           " LEFT JOIN decisions d ON d.expense_id=e.id"
+           " AND d.revision=(SELECT MAX(revision) FROM decisions WHERE expense_id=e.id)")
+_DATE = "COALESCE(json_extract(e.normalized_json,'$.date'), json_extract(e.raw_json,'$.date'))"
+_AMOUNT = "json_extract(d.payload_json,'$.amount')"
+# Whitelisted sort columns: the key comes from the query string, so it is never interpolated.
+SORTS = {"updated": "e.updated_at", "date": _DATE, "amount": _AMOUNT, "employee": "LOWER(e.employee)"}
+MAX_PAGE = 500
+
+
+def _like(text):
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def query_expenses(f, sort="updated", direction="desc", limit=None, offset=0):
+    """Filtered, sorted page of expenses with their latest decision. Returns (rows, total).
+
+    f keys (all optional): status (approve|reject|flag|checking|error), manipulation, source,
+    employee, category, date_from, date_to, amount_min, amount_max, rule, delivery ("problem"), q.
+    """
+    where, args = [], []
+    status = f.get("status")
+    if status == "checking":
+        where.append("(e.status IS NULL OR e.status='checking')")
+    elif status:
+        where.append("e.status=?"); args.append(status)
+    if f.get("manipulation"):
+        where.append("json_extract(d.payload_json,'$.suspected_manipulation')=1")
+    for key in ("source", "employee"):
+        if f.get(key):
+            where.append(f"e.{key}=?"); args.append(f[key])
+    if f.get("category"):
+        where.append("LOWER(COALESCE(json_extract(d.payload_json,'$.category'), json_extract(e.raw_json,'$.category')))=LOWER(?)")
+        args.append(f["category"])
+    if f.get("date_from"):
+        where.append(f"{_DATE}>=?"); args.append(f["date_from"])
+    if f.get("date_to"):
+        where.append(f"{_DATE}<=?"); args.append(f["date_to"])
+    if f.get("amount_min") is not None:
+        where.append(f"{_AMOUNT}>=?"); args.append(float(f["amount_min"]))
+    if f.get("amount_max") is not None:
+        where.append(f"{_AMOUNT}<=?"); args.append(float(f["amount_max"]))
+    if f.get("rule"):
+        where.append("EXISTS (SELECT 1 FROM json_each(d.payload_json,'$.reasons') WHERE json_extract(value,'$.rule')=?)")
+        args.append(f["rule"])
+    if f.get("delivery") == "problem":
+        where.append("d.post_status IN ('failed','dead')")
+    if f.get("q"):
+        where.append("(e.id || ' ' || COALESCE(e.external_id,'') || ' ' || COALESCE(e.employee,'') || ' '"
+                     " || COALESCE(json_extract(e.raw_json,'$.merchant'),'') || ' '"
+                     " || COALESCE(json_extract(e.raw_json,'$.category'),'')) LIKE ? ESCAPE '\\'")
+        args.append(_like(f["q"].strip()))
+    q = _LATEST + (" WHERE " + " AND ".join(where) if where else "")
+    order = SORTS.get(sort, SORTS["updated"])
+    sql_dir = "ASC" if direction == "asc" else "DESC"
+    page = q + f" ORDER BY {order} IS NULL, {order} {sql_dir}, e.id {sql_dir}"
+    page_args = list(args)
+    if limit is not None:
+        page += " LIMIT ? OFFSET ?"
+        page_args += [max(1, min(int(limit), MAX_PAGE)), max(0, int(offset))]
     with _lock:
-        return [_row(r) for r in conn().execute(q, args)]
+        c = conn()
+        rows = [_row(r) for r in c.execute(page, page_args)]
+        total = c.execute(f"SELECT COUNT(*) FROM ({q})", args).fetchone()[0] if limit is not None else len(rows)
+    return rows, total
+
+
+def list_expenses(source=None, employee=None):
+    return query_expenses({"source": source, "employee": employee})[0]
 
 
 def employees():

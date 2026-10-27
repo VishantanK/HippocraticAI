@@ -211,6 +211,19 @@ def test_policy_endpoint_mirrors_config():
     assert not any(str(c) in json.dumps(p) for c in codes)
 
 
+def test_list_filters_and_pages_over_http():
+    submit(dict(EXP, merchant="Asana", employee="Paging Person"))
+    submit(dict(EXP, merchant="Basecamp", employee="Paging Person"))
+    url = f"{BASE}/api/expenses?employee=Paging+Person&sort=employee&dir=asc&limit=1&offset=1"
+    with urllib.request.urlopen(url, timeout=10) as r:
+        rows, total = json.loads(r.read()), r.headers["X-Total-Count"]
+    assert len(rows) == 1 and total == "2"
+    code, rows = call("GET", "/api/expenses?employee=Paging+Person&q=asana")
+    assert code == 200 and [r["raw"]["merchant"] for r in rows] == ["Asana"]
+    code, _ = call("GET", "/api/expenses?amount_min=abc")
+    assert code == 422
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")

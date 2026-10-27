@@ -20,6 +20,13 @@ export const api = {
     const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
     return request<ExpenseSummary[]>(`/api/expenses${params.size ? `?${params}` : ""}`);
   },
+  /** One page of Finance's filtered list; `params` are the API's own query params (also the page URL's). */
+  page: async (params: URLSearchParams) => {
+    const res = await fetch(`/api/expenses?${params}`);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(typeof body.detail === "string" ? body.detail : `Request failed (${res.status})`, res.status);
+    return { rows: body as ExpenseSummary[], total: Number(res.headers.get("X-Total-Count") ?? (body as unknown[]).length) };
+  },
   get: (id: string) => request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}`),
   create: (e: ExpenseInput) => request<ExpenseDetail>("/api/expenses", json("POST", e)),
   update: (id: string, e: ExpenseInput) => request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}`, json("PUT", e)),
