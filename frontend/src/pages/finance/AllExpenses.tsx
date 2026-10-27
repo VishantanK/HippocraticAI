@@ -121,7 +121,7 @@ export default function AllExpenses() {
         </a>
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-line bg-panel p-4 text-sm sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 rounded-lg border border-line bg-panel p-4 text-sm lg:grid-cols-4">
         <Select label="Employee" value={params.get("employee")} onChange={(v) => set({ employee: v })}
           options={(employees ?? []).map((e) => [e, e])} />
         <Select label="Category" value={params.get("category")} onChange={(v) => set({ category: v })}
@@ -130,17 +130,19 @@ export default function AllExpenses() {
           options={Object.entries(RULE_LABEL).sort((a, b) => a[1].localeCompare(b[1]))} />
         <Select label="Source" value={params.get("source")} onChange={(v) => set({ source: v })}
           options={[["portal", "Portal"], ["batch", "Batch"]]} />
-        <div>
+        <div className="col-span-2">
           <span className="field-label">Date</span>
-          <div className="flex gap-1">
-            <input type="date" aria-label="From date" className="field px-2 py-1.5 text-sm" value={params.get("date_from") ?? ""} onChange={(e) => set({ date_from: e.target.value })} />
-            <input type="date" aria-label="To date" className="field px-2 py-1.5 text-sm" value={params.get("date_to") ?? ""} onChange={(e) => set({ date_to: e.target.value })} />
+          <div className="flex items-center gap-2">
+            <input type="date" aria-label="From date" className="field min-w-0 flex-1 px-2 py-1.5 text-sm" value={params.get("date_from") ?? ""} onChange={(e) => set({ date_from: e.target.value })} />
+            <span className="text-muted" aria-hidden>to</span>
+            <input type="date" aria-label="To date" className="field min-w-0 flex-1 px-2 py-1.5 text-sm" value={params.get("date_to") ?? ""} onChange={(e) => set({ date_to: e.target.value })} />
           </div>
         </div>
-        <div>
+        <div className="col-span-2">
           <span className="field-label">Amount (USD)</span>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-2">
             <AmountInput label="Minimum amount" value={params.get("amount_min")} onChange={(v) => set({ amount_min: v })} placeholder="Min" />
+            <span className="text-muted" aria-hidden>to</span>
             <AmountInput label="Maximum amount" value={params.get("amount_max")} onChange={(v) => set({ amount_max: v })} placeholder="Max" />
           </div>
         </div>
@@ -251,7 +253,7 @@ function AmountInput({ label, value, onChange, placeholder }: { label: string; v
   useEffect(() => setV(value ?? ""), [value]);
   const apply = () => { const t = v.trim(); if (t === "" || Number.isFinite(Number(t))) onChange(t); else setV(value ?? ""); };
   return (
-    <input aria-label={label} inputMode="decimal" className="field px-2 py-1.5 text-sm" placeholder={placeholder} value={v}
+    <input aria-label={label} inputMode="decimal" className="field min-w-0 flex-1 px-2 py-1.5 text-sm" placeholder={placeholder} value={v}
       onChange={(e) => setV(e.target.value)} onBlur={apply} onKeyDown={(e) => e.key === "Enter" && apply()} />
   );
 }
