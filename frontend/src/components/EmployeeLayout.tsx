@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { IdentityPicker } from "./IdentityPicker";
 import { LiveDot } from "./LiveDot";
 import { ThemeToggle } from "./ThemeToggle";
@@ -7,6 +8,7 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `rounded px-3 py-1.5 text-sm font-medium ${isActive ? "bg-sunk text-ink" : "text-ink-2 hover:text-ink"}`;
 
 export function EmployeeLayout() {
+  const { pathname } = useLocation(); // a new page gets a fresh boundary
   return (
     <div className="min-h-screen">
       <header className="border-b border-line bg-panel">
@@ -24,7 +26,7 @@ export function EmployeeLayout() {
         </div>
       </header>
       <main className="mx-auto max-w-4xl px-4 py-8">
-        <Outlet />
+        <ErrorBoundary key={pathname}><Outlet /></ErrorBoundary>
       </main>
     </div>
   );

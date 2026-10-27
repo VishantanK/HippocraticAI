@@ -51,11 +51,28 @@ if os.path.isdir(os.path.join(FRONTEND, "assets")):
     app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND, "assets")), name="assets")
 
 
+SSE_QUEUE_MAX = 500  # events buffered per client before it counts as too slow
+
+
+def _offer(q, event):
+    """Runs on the event loop. A client that has fallen this far behind is cut off rather than
+    buffered without limit: its stream ends, EventSource reconnects and the page reloads its data."""
+    if q not in _subscribers:  # already dropped; callbacks scheduled before the drop land here
+        return
+    try:
+        q.put_nowait(event)
+    except asyncio.QueueFull:
+        _subscribers.discard(q)
+        while not q.empty():
+            q.get_nowait()
+        q.put_nowait(None)  # sentinel: close this stream
+
+
 def _broadcast(event):
     if _loop is None:
         return
     for q in list(_subscribers):
-        _loop.call_soon_threadsafe(q.put_nowait, event)
+        _loop.call_soon_threadsafe(_offer, q, event)
 
 
 pipeline.on_decision(_broadcast)
@@ -63,7 +80,7 @@ pipeline.on_decision(_broadcast)
 
 @app.get("/api/stream")
 async def stream(request: Request):
-    q: asyncio.Queue = asyncio.Queue()
+    q: asyncio.Queue = asyncio.Queue(maxsize=SSE_QUEUE_MAX)
     _subscribers.add(q)
 
     async def gen():
@@ -72,6 +89,8 @@ async def stream(request: Request):
             while not await request.is_disconnected():
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=15)
+                    if event is None:  # dropped as too slow (see _offer)
+                        return
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"

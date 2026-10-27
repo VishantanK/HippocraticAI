@@ -263,6 +263,17 @@ def test_delivery_panel_endpoints(monkeypatch):
     assert all(r["expense_id"] != e["id"] for r in call("GET", "/api/deliveries")[1])
 
 
+def test_slow_sse_client_is_dropped_not_buffered_forever():
+    import asyncio
+    from app import server as srv
+    q = asyncio.Queue(maxsize=srv.SSE_QUEUE_MAX)
+    srv._subscribers.add(q)
+    for i in range(srv.SSE_QUEUE_MAX + 5):
+        srv._offer(q, {"type": "decision", "expense_id": f"X-{i}"})
+    assert q not in srv._subscribers                 # no more events are buffered for it
+    assert q.qsize() == 1 and q.get_nowait() is None  # only the "close this stream" sentinel is left
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")

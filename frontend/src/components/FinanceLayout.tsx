@@ -1,5 +1,6 @@
 import { Inbox, LayoutDashboard, Rows3, Send } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { api } from "../lib/api";
 import { useData } from "../lib/useData";
 import { LiveDot } from "./LiveDot";
@@ -9,6 +10,7 @@ const link = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2.5 rounded px-3 py-2 text-sm font-medium ${isActive ? "bg-sunk text-ink" : "text-ink-2 hover:bg-sunk/60 hover:text-ink"}`;
 
 export function FinanceLayout() {
+  const { pathname } = useLocation(); // a new page gets a fresh boundary
   const { data: stats } = useData(api.stats, [], (e) => e.type === "decision" || e.type === "delivery");
   const needsDecision = stats ? stats.by_status.flag ?? 0 : null;
   const undelivered = stats ? stats.post.dead + stats.post.failed : null;
@@ -34,7 +36,7 @@ export function FinanceLayout() {
         <div className="hidden px-5 md:absolute md:bottom-4 md:block"><LiveDot /></div>
       </aside>
       <main className="min-w-0 px-4 py-6 md:px-8">
-        <Outlet />
+        <ErrorBoundary key={pathname}><Outlet /></ErrorBoundary>
       </main>
     </div>
   );

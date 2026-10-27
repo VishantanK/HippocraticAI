@@ -3,7 +3,8 @@ import { useLiveEvents, type LiveEvent } from "./live";
 
 /**
  * Load data and keep it fresh: refetches when a server event matches `relevant`.
- * Bursts (a batch run) are coalesced into one refetch.
+ * Bursts (a batch run) are coalesced into one refetch. After a reconnect or when the tab
+ * becomes visible again, every mounted hook refetches, since events may have been missed.
  */
 export function useData<T>(load: () => Promise<T>, deps: unknown[], relevant: (e: LiveEvent) => boolean = () => true) {
   const [data, setData] = useState<T | null>(null);
@@ -31,7 +32,7 @@ export function useData<T>(load: () => Promise<T>, deps: unknown[], relevant: (e
   }, deps);
 
   useLiveEvents((e) => {
-    if (!relevant(e)) return;
+    if (e.type !== "resync" && !relevant(e)) return;
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(refresh, 250);
   });

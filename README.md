@@ -66,7 +66,7 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
 - `eval.py`: **20/20** past decisions, **18/18** pending (gold labels in `data/expected_pending.json`),
   **99/100** on the synthetic failure-mode set (`data/mock_cases.json`, `--suite mock`),
   zero false approves (a hard assertion).
-- `pytest` (147, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
+- `pytest` (148, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
   concurrency, outbox retry/ordering/claims, async jobs, and the races found in code review.
 
 ## POSTed decision
