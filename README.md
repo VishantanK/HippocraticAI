@@ -1,3 +1,54 @@
+# Expense Auto-Approver: solution
+
+Decides **approve / reject / flag** for each expense, drafts a question to the employee for every
+flag, POSTs every decision to `/decisions`, and serves an employee portal plus a Finance dashboard.
+Batch and portal share one pipeline.
+
+## Run
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # keys in .env
+python mock_server.py                                  # :8000 decisions endpoint
+.venv/bin/uvicorn app.server:app --port 8001           # portal: /   dashboard: /finance
+.venv/bin/python batch.py                              # process data/pending_expenses.json
+.venv/bin/python eval.py                               # score vs labels (live LLMs)
+.venv/bin/python -m pytest -q                          # offline tests
+```
+
+## How a decision is made (`app/pipeline.py`)
+1. **Input guard** (`app/guard.py`): schema/length checks, unknown keys dropped, Unicode sanitised.
+   A manipulation screen runs on every free-text field and follow-up answer. The **OpenAI Decisions
+   API** predicate (`gpt-6-luna`) rejects at p >= 0.5, the Claude screen is the fallback, and a
+   4-pattern regex is the backstop. Manipulation -> **reject**.
+2. **Normalise** (`app/normalize.py`): amount/currency (no marker = USD), ISO or US dates, weekday.
+3. **Extract** (`app/llm.py`, Claude, JSON schema): canonical category, named client, city.
+   An exact category match overrides the model.
+4. **Policy** (`app/policy.py`, pure code; see ASSUMPTIONS.md): caps, weekend meals, Tier-1 hotels,
+   receipt over $25, software codes, split detection. Untrusted data flags before any cap is applied.
+5. **Fail closed**: if the guard or extraction can't complete -> flag, never approve.
+6. **Question** for flags (Claude, falls back to a template) -> stored -> POSTed -> pushed over SSE.
+
+The LLMs never output the decision. Prompts live in `app/prompts/`.
+
+## Results
+- `eval.py`: **20/20** past decisions, **18/18** pending (gold labels in `data/expected_pending.json`),
+  zero false approves (a hard assertion).
+- `pytest`: policy boundaries, parsers, guard, adversarial attacks, portal HTTP round-trips.
+
+## POSTed decision
+`{id, employee, decision, reasons:[{rule, detail}], question, amount, currency, category,
+category_mapped_from, client, suspected_manipulation, revision, source, decided_by,
+policy_version, prompt_version, decided_at}`. Each re-decision (edit, answer, Finance override)
+is a new `revision`; downstream should keep the latest.
+
+## Storage (`app/store.py`, SQLite `expenses.db`)
+- `expenses`: current raw + normalised fields, follow-up answers, version, latest status.
+- `decisions`: append-only; the exact POSTed payload, audit signals (guard score, extraction), POST status.
+- `followups`: question, answer, status (open / answered / superseded).
+
+Docs: `docs/` (requirements, ADRs, architecture), `ASSUMPTIONS.md`, `AGENTS.md`.
+
+---
+
 # Setup
 
 ## 1. Install

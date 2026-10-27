@@ -17,6 +17,7 @@ LLM-drafted question. Every decision is stored as a revision and POSTed downstre
 | app/pipeline.py | evaluate (pure) + process (store, POST, notify) + human override |
 | app/store.py | SQLite: expenses, decisions, followups |
 | app/poster.py | POST /decisions |
+| app/server.py | FastAPI REST + SSE; serves static/employee.html and static/finance.html |
 | batch.py / eval.py | batch run / labelled-data scoring |
 
 ## Decision flow
@@ -30,4 +31,4 @@ See AGENTS.md design rules; tests in tests/test_guard.py and tests/test_adversar
 See docs/DECISIONS.md.
 
 ## Planned
-FastAPI server, employee portal, Finance dashboard.
+POST retry outbox, auth/roles, receipt OCR.
