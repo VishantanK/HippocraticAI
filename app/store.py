@@ -176,9 +176,9 @@ def employee_history(employee, exclude_id):
     """Normalised view of the employee's other expenses (for split detection)."""
     with _lock:
         rows = conn().execute(
-            "SELECT id, normalized_json FROM expenses WHERE employee=? AND id!=? AND normalized_json IS NOT NULL",
+            "SELECT id, normalized_json, status FROM expenses WHERE employee=? AND id!=? AND normalized_json IS NOT NULL",
             (employee, exclude_id)).fetchall()
-    return [dict(json.loads(r["normalized_json"]), id=r["id"]) for r in rows]
+    return [dict(json.loads(r["normalized_json"]), id=r["id"], status=r["status"]) for r in rows]
 
 
 def expense_detail(expense_id):

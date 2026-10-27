@@ -7,3 +7,4 @@
 | [0003](adr/0003-reject-manipulation-flag-unknowns.md) Manipulation is rejected; unknowns and failures are flagged | Finance's call; a wrong approval costs more than a human look | Flagging manipulation for review |
 | [0004](adr/0004-no-fx-table.md) Non-USD amounts are flagged and the employee is asked for the USD amount | No stale hardcoded rates | Static FX table |
 | [0005](adr/0005-sqlite-append-only.md) SQLite with append-only decision/follow-up history | One file, full audit trail, matches what was POSTed | JSON file; in-memory store |
+| [0006](adr/0006-backstop-rules.md) Flag duplicates, amounts over $1,000 and future dates | Stop double payment and runaway uncapped approvals | Reject duplicates; no ceiling |

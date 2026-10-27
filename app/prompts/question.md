@@ -16,5 +16,8 @@ Gap guidance:
 - missing_merchant: ask for the merchant name.
 - non_usd: ask for the USD amount charged (per card statement).
 - invalid_amount / non_positive_amount / invalid_date: ask for the correct value.
+- possible_duplicate: ask whether this is a separate purchase or a duplicate of the expense named in the detail.
+- high_amount_review: ask for the itemized receipt and a one-line business justification.
+- future_date: ask for the correct date.
 - possible_split: ask whether the two charges were one meal split across bills, and how many people attended / whether a client was present.
 - llm_unavailable / guard_unavailable: say the automated check couldn't complete and Finance will review; ask nothing unless other gaps exist.

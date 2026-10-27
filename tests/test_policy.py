@@ -92,3 +92,35 @@ def test_split_detection():
     assert run(amount=20, history=[far])[0] == "approve"
     other = dict(prior, merchant="Chipotle")
     assert run(amount=20, history=[other])[0] == "approve"
+
+
+def test_duplicate_flags():
+    prior = {"id": "T-0", "date": "2026-06-15", "merchant": "CAVA", "category": "Lunch",
+             "amount": 20.0, "currency": "USD", "is_client": False, "status": "approve"}
+    d, r = run(amount=20, history=[prior])
+    assert d == "flag" and r[0]["rule"] == "possible_duplicate" and "T-0" in r[0]["detail"]
+    assert run(amount=20, history=[dict(prior, status="reject")])[0] == "approve"   # rejected original
+    assert run(amount=21, history=[prior])[0] == "flag"                              # split rule instead
+    assert run(amount=20, history=[dict(prior, date="2026-06-16")])[0] == "flag"     # adjacent day -> split
+    assert run(amount=20, history=[dict(prior, date="2026-06-20")])[0] == "approve"
+
+
+def test_duplicate_applies_to_uncapped_categories():
+    prior = {"id": "T-0", "date": "2026-06-15", "merchant": "Uber", "category": "GroundTransport",
+             "amount": 32.4, "currency": "USD", "is_client": False, "status": "approve"}
+    d, r = run(category="Uber", merchant="Uber", amount=32.4, sig={"category": "GroundTransport"}, history=[prior])
+    assert d == "flag" and r[0]["rule"] == "possible_duplicate"
+
+
+def test_high_amount_backstop():
+    client = {"is_client": True, "client_name": "Acme"}
+    assert run(category="Dinner", amount=1000, sig=client)[0] == "approve"
+    d, r = run(category="Dinner", amount=1000.01, sig=client)
+    assert d == "flag" and r[0]["rule"] == "high_amount_review"
+    assert run(category="Airfare", amount=2400, sig={"category": "Airfare"})[0] == "flag"
+    assert run(category="Dinner", amount=5000)[0] == "reject"   # a reject stays a reject
+
+
+def test_future_date_flags():
+    d, r = run(date="2999-01-01")
+    assert d == "flag" and "future_date" in [x["rule"] for x in r]

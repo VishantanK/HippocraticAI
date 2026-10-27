@@ -141,6 +141,9 @@ def _template_question(raw, reasons):
         "non_positive_amount": "confirm the amount",
         "invalid_date": "confirm the date of the expense",
         "possible_split": "confirm whether these charges were one meal, how many attended, and whether a client was present",
+        "possible_duplicate": "confirm whether this is a separate purchase or a duplicate of an expense you already submitted",
+        "high_amount_review": "attach the itemized receipt and a short business justification for this amount",
+        "future_date": "confirm the date of the expense",
     }
     items = [asks[r["rule"]] for r in reasons if r["rule"] in asks]
     what = f"{raw.get('merchant') or 'your expense'} on {raw.get('date')} ({raw.get('amount')})"

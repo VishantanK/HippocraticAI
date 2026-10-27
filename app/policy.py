@@ -4,7 +4,8 @@ evaluate(norm, signals, history) -> (decision, reasons)
 
   norm     output of normalize.normalize() (plus "id", "employee")
   signals  LLM-extracted facts: category, category_confidence, is_client, client_name, city
-  history  other normalised expenses by the same employee (for split detection)
+  history  other normalised expenses by the same employee, with their latest "status"
+           (for duplicate and split detection)
 
 Order: rejects that can be determined from trusted fields first, then flags,
 then approve. Data we cannot trust (non-USD amount, unknown category) is a flag
@@ -25,8 +26,9 @@ def is_tier1(city_text):
     return any(alias in t for aliases in config.TIER1_CITIES.values() for alias in aliases)
 
 
-def evaluate(norm, signals, history=(), approval_codes=None):
+def evaluate(norm, signals, history=(), approval_codes=None, today=None):
     approval_codes = approval_codes if approval_codes is not None else config.load_approval_codes()
+    today = today or dt.date.today()
     flags, rejects = [], []
 
     category = signals.get("category")
@@ -49,6 +51,8 @@ def evaluate(norm, signals, history=(), approval_codes=None):
         flags.append(_reason("non_positive_amount", f"Amount {amount:.2f} is zero or negative."))
     if norm["date"] is None:
         flags.append(_reason("invalid_date", "Date is missing or unreadable."))
+    elif dt.date.fromisoformat(norm["date"]) > today:
+        flags.append(_reason("future_date", f"Date {norm['date']} is in the future."))
 
     can_apply_caps = amount is not None and currency == "USD" and amount > 0 and \
         category not in (None, "unknown") and not any(f["rule"] in ("missing_category", "unknown_category") for f in flags)
@@ -88,13 +92,37 @@ def evaluate(norm, signals, history=(), approval_codes=None):
             flags.append(_reason("missing_approval_code", "Software purchases need an approval code."))
         elif code not in approval_codes:
             flags.append(_reason("unknown_approval_code", f"Approval code {code!r} is not on file."))
-    split = detect_split(norm, category, is_client, history)
-    if split:
-        flags.append(split)
+    dup = detect_duplicate(norm, history)
+    split = None if dup else detect_split(norm, category, is_client, history)
+    flags.extend(r for r in (dup, split) if r)
+    if amount > config.HIGH_AMOUNT_REVIEW:
+        flags.append(_reason("high_amount_review",
+                             f"${amount:,.2f} is over the ${config.HIGH_AMOUNT_REVIEW:,.0f} automatic-approval limit."))
 
     if flags:
         return "flag", flags
     return "approve", [_reason("within_policy", _approve_detail(category, amount, is_client, signals))]
+
+
+def _active(history, norm):
+    """Other expenses that could be paid: not this one, not rejected, USD, dated."""
+    for other in history:
+        if other.get("id") == norm.get("id") or other.get("status") == "reject":
+            continue
+        if not other.get("date") or other.get("currency") != "USD" or other.get("amount") is None:
+            continue
+        yield other
+
+
+def detect_duplicate(norm, history):
+    """Same employee (history is per-employee), merchant, date and amount as a live expense."""
+    merchant = norm["merchant"].lower()
+    for other in _active(history, norm):
+        if ((other.get("merchant") or "").lower() == merchant and other["date"] == norm["date"]
+                and abs(other["amount"] - norm["amount"]) < 0.005):
+            return _reason("possible_duplicate",
+                           f"Looks like a duplicate of {other['id']} (same merchant, date and amount).")
+    return None
 
 
 def detect_split(norm, category, is_client, history):
@@ -104,12 +132,10 @@ def detect_split(norm, category, is_client, history):
     cap = config.MEAL_CAPS[category]
     day = dt.date.fromisoformat(norm["date"])
     merchant = norm["merchant"].lower()
-    for other in history:
-        if other.get("id") == norm.get("id") or not other.get("date"):
-            continue
+    for other in _active(history, norm):
         if (other.get("merchant") or "").lower() != merchant or other.get("category") != category:
             continue
-        if other.get("is_client") or other.get("currency") != "USD" or other.get("amount") is None:
+        if other.get("is_client"):
             continue
         if abs((dt.date.fromisoformat(other["date"]) - day).days) > 1:
             continue

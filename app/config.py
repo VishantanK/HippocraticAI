@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(ROOT, ".env"))
 
-POLICY_VERSION = "2026-10-27.1"
+POLICY_VERSION = "2026-10-27.2"
 PROMPT_VERSION = "v1"
 
 DECISIONS_ENDPOINT = os.getenv("DECISIONS_ENDPOINT", "http://localhost:8000/decisions")
@@ -48,6 +48,9 @@ TIER1_CITIES = {
 }
 
 RECEIPT_THRESHOLD = 25.0
+
+# Backstop for uncapped categories: anything above this goes to a human even if within policy.
+HIGH_AMOUNT_REVIEW = float(os.getenv("HIGH_AMOUNT_REVIEW", "1000"))
 
 
 def load_approval_codes():
