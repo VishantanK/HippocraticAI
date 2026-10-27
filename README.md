@@ -7,8 +7,9 @@ Batch and portal share one pipeline.
 ## Run
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # keys in .env
+(cd frontend && npm install && npm run build)          # React UI -> frontend/dist
 python mock_server.py                                  # :8000 decisions endpoint
-.venv/bin/uvicorn app.server:app --port 8001           # portal: /   dashboard: /finance
+.venv/bin/uvicorn app.server:app --port 8001           # UI: /employee and /finance
 .venv/bin/python batch.py                              # process data/pending_expenses.json
 .venv/bin/python eval.py                               # score vs labels (live LLMs)
 .venv/bin/python -m pytest -q                          # offline tests
@@ -27,22 +28,53 @@ python mock_server.py                                  # :8000 decisions endpoin
 5. **Fail closed**: if the guard or extraction can't complete -> flag, never approve.
 6. **Question** for flags (Claude, falls back to a template) -> stored -> POSTed -> pushed over SSE.
 
+Guard thresholds: reject at p >= 0.85 with the text located to a field; 0.5-0.85 goes to a person.
+Follow-up replies are labelled `reply_to_finance_N` so the screen knows they answer Finance.
+
+## Robustness
+- **Async:** portal writes return 202 `checking`; a worker pool decides (`app/jobs.py`) and the
+  result arrives over SSE. Rapid edits coalesce; anything left `checking` is re-queued on startup;
+  a crashed job records a fail-closed `check_failed` flag.
+- **Concurrency:** per-expense lock plus atomic revision allocation; same-employee evaluations are
+  serialised so duplicate/split checks always see each other.
+- **Delivery:** an outbox (`app/outbox.py`) claims each row atomically, retries with backoff
+  (8 attempts, then `dead`), sends `Idempotency-Key: {id}:{revision}`, and never delivers a
+  superseded revision. Verified: endpoint down for a batch of 18, all delivered exactly once on recovery.
+- **Backstop rules:** duplicates (a reply can't clear one), anything over $1,000, future dates.
+- **Human decisions are final** for that version: queued re-checks don't replace them, and an edit
+  made after review can only flag.
+
+## UI (React + Vite + Tailwind, `frontend/`)
+| Route | For |
+|---|---|
+| `/employee` | My expenses; questions from Finance on top |
+| `/employee/new` | Form with validation, or JSON/CSV drag-and-drop with preview |
+| `/employee/expenses/:id` | Decision stamp, reply form matched to the gap, edit, history |
+| `/finance` | Decision mix, spend by category, manipulation and delivery alerts, recent decisions |
+| `/finance/queue` | Ready for your decision vs waiting on the employee |
+| `/finance/expenses` | Sortable, filterable table |
+| `/finance/expenses/:id` | Submitted vs read-as, automated checks, history with delivery, approve/reject |
+
+Dev mode: `cd frontend && npm run dev` (proxies `/api` to :8001).
+
 The LLMs never output the decision. Prompts live in `app/prompts/`.
 
 ## Results
 - `eval.py`: **20/20** past decisions, **18/18** pending (gold labels in `data/expected_pending.json`),
   zero false approves (a hard assertion).
-- `pytest`: policy boundaries, parsers, guard, adversarial attacks, portal HTTP round-trips.
+- `pytest` (83, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
+  concurrency, outbox retry/ordering/claims, async jobs, and the races found in code review.
 
 ## POSTed decision
 `{id, employee, decision, reasons:[{rule, detail}], question, amount, currency, category,
-category_mapped_from, client, suspected_manipulation, revision, source, decided_by,
+category_mapped_from, client, suspected_manipulation, revision, decision_key, source, decided_by,
 policy_version, prompt_version, decided_at}`. Each re-decision (edit, answer, Finance override)
 is a new `revision`; downstream should keep the latest.
 
 ## Storage (`app/store.py`, SQLite `expenses.db`)
 - `expenses`: current raw + normalised fields, follow-up answers, version, latest status.
-- `decisions`: append-only; the exact POSTed payload, audit signals (guard score, extraction), POST status.
+- `decisions`: append-only; the exact POSTed payload, audit signals (guard score, extraction),
+  delivery state (pending/sending/sent/failed/dead/superseded, attempts, next retry, last error).
 - `followups`: question, answer, status (open / answered / superseded).
 
 Docs: `docs/` (requirements, ADRs, architecture), `ASSUMPTIONS.md`, `AGENTS.md`.

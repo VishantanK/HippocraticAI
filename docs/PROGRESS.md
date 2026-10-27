@@ -1,22 +1,25 @@
 # Progress
 
 ## Current slice
-Done: end-to-end system. Next: polish and review.
+v2 done: robustness + React UI. Next: polish from user review.
 
 ## Done
-- Policy engine, normalisation, input guard (Decisions API + Claude fallback + regex backstop)
-- LLM extraction and question drafting; pipeline; SQLite store; POST; batch.py; eval.py
-- FastAPI server with SSE; employee portal (submit/upload/edit/answer); Finance dashboard (filters, history, override)
-- Live batch: 18 decisions POSTed, 4 flags with questions; eval 38/38, zero false approves
+- v1: policy, guard, extraction, questions, pipeline, store, batch, eval, basic UI
+- v2 backend: per-expense lock, backstop rules, POST outbox, async jobs, stats; review fixes
+  (ordering, human-final, same-employee races, sticky duplicates, failure flag)
+- Guard false-positive fix (found live): labelled replies, two-band thresholds, extractor flag removed
+- React UI: /employee and /finance routes
+- Verified live: eval 38/38; outbox recovery 18/18 delivered once; portal flag -> reply -> approve,
+  manipulative replies rejected
 
 ## Next
-- Retry failed POSTs (outbox); auth/roles; receipt OCR; alcohol and per-person rules (open questions)
-- Browser smoke test of the UI (Chrome automation couldn't reach the local server)
+- Visual check of the UI in a browser (Chrome automation can't reach the local server here)
+- Auth/roles; receipt OCR; per-person caps and alcohol rule (open questions)
 
 ## Gotchas
 - `.env` keys have a space before `=`; python-dotenv handles it.
-- Tests set LLM_DISABLED=1 and stub the LLMs; eval.py and batch.py use live LLMs.
-- uvicorn binds IPv4 localhost only.
+- Tests stub LLMs; eval.py and batch.py call live APIs.
+- Rebuild the UI (`cd frontend && npm run build`) after frontend changes; FastAPI serves dist/.
 
 ## Last test result
-59 passed
+83 passed; eval 38/38, zero false approves
