@@ -8,6 +8,7 @@ portal plus a Finance dashboard. Built live, demoed and code-reviewed.
 - Setup: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
 - Test (offline, no LLM): `.venv/bin/python -m pytest -q`
 - Eval (live LLMs, labelled data): `.venv/bin/python eval.py`
+  (`--suite mock` runs only the 100 synthetic failure-mode cases in `data/mock_cases.json`)
 - Mock endpoint: `python mock_server.py` (localhost:8000)
 - Batch: `.venv/bin/python batch.py [file]`
 - Portal: `.venv/bin/uvicorn app.server:app --port 8001`
