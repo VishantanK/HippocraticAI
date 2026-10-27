@@ -274,6 +274,80 @@ def test_slow_sse_client_is_dropped_not_buffered_forever():
     assert q.qsize() == 1 and q.get_nowait() is None  # only the "close this stream" sentinel is left
 
 
+def keyed(method, path, key, body=None, form=None):
+    """Like call(), with an Idempotency-Key header."""
+    headers, data = {"Idempotency-Key": key}, None
+    if body is not None:
+        data, headers["Content-Type"] = json.dumps(body).encode(), "application/json"
+    if form is not None:
+        boundary = uuid.uuid4().hex
+        data = b"".join(
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"; filename="{v[0]}"\r\n\r\n'.encode() + v[1] + b"\r\n")
+            if isinstance(v, tuple) else f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
+            for k, v in form.items()) + f"--{boundary}--\r\n".encode()
+        headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+    req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def count_for(employee):
+    return len(call("GET", f"/api/expenses?employee={urllib.parse.quote(employee)}")[1])
+
+
+def test_retried_create_is_not_a_second_expense():
+    key = uuid.uuid4().hex
+    body = dict(EXP, merchant="Calendly", employee="Retry Person")
+    code1, a = keyed("POST", "/api/expenses", key, body)
+    code2, b = keyed("POST", "/api/expenses", key, body)
+    assert code1 == code2 == 202 and a["id"] == b["id"] and count_for("Retry Person") == 1
+    _, c = keyed("POST", "/api/expenses", uuid.uuid4().hex, body)     # a new key is a new expense
+    assert c["id"] != a["id"] and count_for("Retry Person") == 2
+
+
+def test_retried_upload_and_answer_apply_once():
+    key = uuid.uuid4().hex
+    rows = json.dumps([dict(EXP, merchant="Loom", employee="Retry Upload")]).encode()
+    _, a = keyed("POST", "/api/expenses/upload", key, form={"file": ("u.json", rows)})
+    _, b = keyed("POST", "/api/expenses/upload", key, form={"file": ("u.json", rows)})
+    assert [r["id"] for r in a] == [r["id"] for r in b] and count_for("Retry Upload") == 1
+    e = decided(a[0]["id"])
+    assert e["status"] == "flag"                                    # Software with no code: a question
+    key = uuid.uuid4().hex
+    code1, _ = keyed("POST", f"/api/expenses/{e['id']}/answer", key, form={"text": "manager approved"})
+    code2, _ = keyed("POST", f"/api/expenses/{e['id']}/answer", key, form={"text": "manager approved"})
+    assert code1 == code2 == 202
+    assert len(call("GET", f"/api/expenses/{e['id']}")[1]["answers"]) == 1
+
+
+def test_key_is_scoped_to_the_endpoint():
+    key = uuid.uuid4().hex
+    _, a = keyed("POST", "/api/expenses", key, dict(EXP, merchant="Miro", employee="Scope Person"))
+    code, _ = keyed("POST", "/api/expenses/upload", key,
+                    form={"file": ("u.json", json.dumps([dict(EXP, employee="Scope Person")]).encode())})
+    assert code == 202 and count_for("Scope Person") == 2
+
+
+def test_upload_is_all_or_nothing():
+    before = count_for("Atomic Person")
+    rows = [dict(EXP, merchant="Ok", employee="Atomic Person"), "not an expense", dict(EXP, employee="Atomic Person")]
+    code, res = call("POST", "/api/expenses/upload", form={"file": ("bad.json", json.dumps(rows).encode())})
+    assert code == 400 and "row 2" in res["detail"]
+    assert count_for("Atomic Person") == before
+
+
+def test_reversing_a_decision_needs_a_note():
+    e = submit(dict(EXP, category="Lunch", merchant="Chipotle", amount=12.0, employee="Note Person"))
+    assert e["status"] == "approve"
+    code, res = call("POST", f"/api/expenses/{e['id']}/override", {"decision": "reject", "note": "  "})
+    assert code == 400 and "note" in res["detail"]
+    code, _ = call("POST", f"/api/expenses/{e['id']}/override", {"decision": "reject", "note": "personal meal"})
+    assert code == 200
+
+
 def test_recover_reenqueues_checking():
     from app import jobs
     store.upsert_expense("WEB-9999", dict(EXP, merchant="Miro"), "portal")

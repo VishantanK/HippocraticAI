@@ -1,6 +1,7 @@
 import { Paperclip } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { api } from "../lib/api";
+import { clearDraft, loadDraft, newActionKey, saveDraft, useUnsavedWarning } from "../lib/draft";
 import { answerFieldsFor, CATEGORIES } from "../lib/format";
 import type { Reason } from "../lib/types";
 import { useToast } from "./Toast";
@@ -12,6 +13,18 @@ export function AnswerForm({ expenseId, reasons, onSent }: { expenseId: string; 
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   const toast = useToast();
+  const draftKey = `answer:${expenseId}`;
+  const [draft] = useState(() => loadDraft<Record<string, string>>(draftKey) ?? {});
+  const [dirty, setDirty] = useState(Object.values(draft).some(Boolean));
+  const actionKey = useRef(newActionKey()); // same key if the user presses Send again after a timeout
+  useUnsavedWarning(dirty && !busy);
+
+  function remember(e: FormEvent<HTMLFormElement>) {
+    const values: Record<string, string> = {};
+    new FormData(e.currentTarget).forEach((v, k) => { if (typeof v === "string") values[k] = v; });
+    saveDraft(draftKey, values);
+    setDirty(Object.values(values).some((v) => v.trim()) || !!fileName);
+  }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -21,7 +34,10 @@ export function AnswerForm({ expenseId, reasons, onSent }: { expenseId: string; 
     setBusy(true);
     setError(null);
     try {
-      await api.answer(expenseId, form);
+      await api.answer(expenseId, form, actionKey.current);
+      clearDraft(draftKey);
+      setDirty(false);
+      actionKey.current = newActionKey();
       toast("Reply sent. Checking again.");
       onSent();
     } catch (err) {
@@ -32,7 +48,7 @@ export function AnswerForm({ expenseId, reasons, onSent }: { expenseId: string; 
   }
 
   return (
-    <form onSubmit={submit} className="mt-4 space-y-4">
+    <form onSubmit={submit} onInput={remember} className="mt-4 space-y-4">
       {need.receipt && (
         <div>
           <span className="field-label">Receipt</span>
@@ -46,13 +62,13 @@ export function AnswerForm({ expenseId, reasons, onSent }: { expenseId: string; 
         {need.approvalCode && (
           <div>
             <label className="field-label" htmlFor="a-code">Approval code</label>
-            <input id="a-code" name="approval_code" className="field" placeholder="SW-1234" />
+            <input id="a-code" name="approval_code" defaultValue={draft.approval_code} className="field" placeholder="SW-1234" />
           </div>
         )}
         {need.category && (
           <div>
             <label className="field-label" htmlFor="a-cat">Category</label>
-            <select id="a-cat" name="category" className="field" defaultValue="">
+            <select id="a-cat" name="category" className="field" defaultValue={draft.category ?? ""}>
               <option value="">Choose…</option>
               {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
             </select>
@@ -61,19 +77,19 @@ export function AnswerForm({ expenseId, reasons, onSent }: { expenseId: string; 
         {need.amount && (
           <div>
             <label className="field-label" htmlFor="a-amount">Amount in USD, as charged</label>
-            <input id="a-amount" name="amount" inputMode="decimal" className="field" placeholder="70.20" />
+            <input id="a-amount" name="amount" defaultValue={draft.amount} inputMode="decimal" className="field" placeholder="70.20" />
           </div>
         )}
         {need.merchant && (
           <div>
             <label className="field-label" htmlFor="a-merchant">Merchant</label>
-            <input id="a-merchant" name="merchant" className="field" />
+            <input id="a-merchant" name="merchant" defaultValue={draft.merchant} className="field" />
           </div>
         )}
       </div>
       <div>
         <label className="field-label" htmlFor="a-text">Reply to Finance</label>
-        <textarea id="a-text" name="text" rows={3} className="field" placeholder="Anything that answers the question" />
+        <textarea id="a-text" name="text" rows={3} defaultValue={draft.text} className="field" placeholder="Anything that answers the question" />
       </div>
       {error && <p className="text-sm text-reject">{error}</p>}
       <button className="btn-primary" disabled={busy}>{busy ? "Sending…" : "Send reply"}</button>

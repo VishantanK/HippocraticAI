@@ -2,6 +2,7 @@ import { Info } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { api } from "../lib/api";
 import { CATEGORIES } from "../lib/format";
+import { clearDraft, loadDraft, saveDraft, useUnsavedWarning } from "../lib/draft";
 import { hintsFor } from "../lib/policyHints";
 import type { ExpenseInput, RawExpense } from "../lib/types";
 import { useData } from "../lib/useData";
@@ -42,12 +43,22 @@ function clean(v: ExpenseInput): ExpenseInput {
   };
 }
 
+/** With `draftKey`, unsent input survives a reload or navigating away; the parent calls
+ *  clearDraft(draftKey) once the submit succeeds. */
 export function ExpenseForm({
-  initial, submitLabel, busy, onSubmit,
-}: { initial: ExpenseInput; submitLabel: string; busy?: boolean; onSubmit: (v: ExpenseInput) => void }) {
-  const [v, setV] = useState(initial);
+  initial, submitLabel, busy, onSubmit, draftKey,
+}: { initial: ExpenseInput; submitLabel: string; busy?: boolean; onSubmit: (v: ExpenseInput) => void; draftKey?: string }) {
+  const [restored, setRestored] = useState(() => !!draftKey && !!loadDraft<ExpenseInput>(draftKey));
+  const [v, setV] = useState<ExpenseInput>(() => (draftKey && loadDraft<ExpenseInput>(draftKey)) || initial);
   const [errors, setErrors] = useState<Errors>({});
-  const set = <K extends keyof ExpenseInput>(k: K, val: ExpenseInput[K]) => setV((p) => ({ ...p, [k]: val }));
+  const set = <K extends keyof ExpenseInput>(k: K, val: ExpenseInput[K]) => setV((p) => {
+    const next = { ...p, [k]: val };
+    if (draftKey) saveDraft(draftKey, next);
+    return next;
+  });
+  const dirty = JSON.stringify(v) !== JSON.stringify(initial);
+  useUnsavedWarning(dirty && !busy);
+  const discard = () => { if (draftKey) clearDraft(draftKey); setV(initial); setRestored(false); };
   const isSoftware = (v.category ?? "").toLowerCase() === "software";
   // Hints are optional: if the policy can't be loaded the form works exactly as before.
   const { data: policy } = useData(api.policy, [], () => false);
@@ -64,6 +75,12 @@ export function ExpenseForm({
 
   return (
     <form onSubmit={submit} noValidate className="space-y-5">
+      {restored && dirty && (
+        <p className="flex flex-wrap items-center gap-2 rounded bg-sunk px-3 py-2 text-sm text-ink-2">
+          Your unsent draft was restored.
+          <button type="button" className="underline hover:text-ink" onClick={discard}>Start over</button>
+        </p>
+      )}
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label className="field-label" htmlFor="f-date">Date</label>

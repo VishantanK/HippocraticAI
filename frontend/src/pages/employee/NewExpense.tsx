@@ -1,11 +1,12 @@
 import { FileUp } from "lucide-react";
-import { useState, type DragEvent } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExpenseForm, toInput } from "../../components/ExpenseForm";
 import { IdentityPicker } from "../../components/IdentityPicker";
 import { useToast } from "../../components/Toast";
 import { api } from "../../lib/api";
 import { parseCsv } from "../../lib/csv";
+import { clearDraft, newActionKey } from "../../lib/draft";
 import { useIdentity } from "../../lib/identity";
 
 type Tab = "form" | "file";
@@ -18,6 +19,9 @@ export default function NewExpense() {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const toast = useToast();
+  // One key per visit to this page: if a send times out and the user presses it again, the
+  // server returns the first result instead of creating a second expense.
+  const actionKey = useRef(newActionKey());
 
   if (!me) {
     return (
@@ -46,10 +50,12 @@ export default function NewExpense() {
             initial={toInput(null, me)}
             submitLabel="Send for approval"
             busy={busy}
+            draftKey={`new:${me}`}
             onSubmit={async (v) => {
               setBusy(true); setError(null);
               try {
-                const e = await api.create({ ...v, employee: me });
+                const e = await api.create({ ...v, employee: me }, actionKey.current);
+                clearDraft(`new:${me}`);
                 navigate(`/employee/expenses/${e.id}`);
               } catch (err) { setError((err as Error).message); setBusy(false); }
             }}
@@ -58,7 +64,7 @@ export default function NewExpense() {
           <Upload me={me} busy={busy} onUpload={async (file) => {
             setBusy(true); setError(null);
             try {
-              const res = await api.upload(file, me);
+              const res = await api.upload(file, me, actionKey.current);
               toast(`${res.length} expense${res.length === 1 ? "" : "s"} sent. Decisions will appear as they're checked.`);
               navigate("/employee");
             } catch (err) { setError((err as Error).message); setBusy(false); }

@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS decisions (
   decided_at TEXT NOT NULL,
   UNIQUE (expense_id, revision)
 );
+CREATE TABLE IF NOT EXISTS idempotency (
+  key TEXT PRIMARY KEY,               -- "<endpoint scope>:<client Idempotency-Key>"
+  expense_ids TEXT NOT NULL,          -- JSON list: what the first request created or changed
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS followups (
   rowid INTEGER PRIMARY KEY AUTOINCREMENT,
   expense_id TEXT NOT NULL REFERENCES expenses(id),
@@ -118,6 +123,40 @@ def next_portal_id():
         while get_expense(f"WEB-{n + 1:04d}"):
             n += 1
         return f"WEB-{n + 1:04d}"
+
+
+def add_portal_expenses(rows):
+    """Insert several new portal expenses in one transaction, already 'checking'.
+    rows: [(raw, external_id)]. Returns their ids. On any error nothing is stored."""
+    with _lock:
+        c = conn()
+        ids, ts = [], now()
+        try:
+            for raw, external_id in rows:
+                eid = next_portal_id()  # sees this transaction's own inserts
+                c.execute(
+                    "INSERT INTO expenses (id, employee, source, external_id, raw_json, version, status, created_at, updated_at)"
+                    " VALUES (?,?,?,?,?,1,'checking',?,?)",
+                    (eid, raw.get("employee"), "portal", external_id, json.dumps(raw), ts, ts))
+                ids.append(eid)
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+        return ids
+
+
+def idempotent_ids(key):
+    with _lock:
+        r = conn().execute("SELECT expense_ids FROM idempotency WHERE key=?", (key,)).fetchone()
+        return json.loads(r[0]) if r else None
+
+
+def remember_idempotent(key, expense_ids):
+    with _lock:
+        conn().execute("INSERT OR IGNORE INTO idempotency (key, expense_ids, created_at) VALUES (?,?,?)",
+                       (key, json.dumps(expense_ids), now()))
+        conn().commit()
 
 
 def upsert_expense(expense_id, raw, source, external_id=None):

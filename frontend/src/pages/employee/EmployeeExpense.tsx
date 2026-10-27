@@ -10,6 +10,7 @@ import { useToast } from "../../components/Toast";
 import { api } from "../../lib/api";
 import { amountOf, day } from "../../lib/format";
 import type { ExpenseDetail } from "../../lib/types";
+import { clearDraft } from "../../lib/draft";
 import { useData } from "../../lib/useData";
 
 function headline(e: ExpenseDetail, hasQuestion: boolean) {
@@ -87,14 +88,19 @@ export default function EmployeeExpense() {
               initial={toInput(e.raw, e.employee ?? "")}
               submitLabel="Save and check again"
               busy={busy}
+              draftKey={`edit:${e.id}:${e.version}`}
               onSubmit={async (v) => {
                 setBusy(true);
-                try { await api.update(e.id, { ...v, employee: e.employee }); toast("Saved. Checking again."); setEditing(false); refresh(); }
+                try {
+                  await api.update(e.id, { ...v, employee: e.employee });
+                  clearDraft(`edit:${e.id}:${e.version}`);
+                  toast("Saved. Checking again."); setEditing(false); refresh();
+                }
                 catch (err) { toast((err as Error).message, "error"); }
                 finally { setBusy(false); }
               }}
             />
-            <button className="btn-quiet mt-3" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="btn-quiet mt-3" onClick={() => { clearDraft(`edit:${e.id}:${e.version}`); setEditing(false); }}>Cancel</button>
           </>
         ) : (
           <dl className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">

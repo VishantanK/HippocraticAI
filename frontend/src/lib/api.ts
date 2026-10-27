@@ -15,6 +15,10 @@ const json = (method: string, body: unknown): RequestInit => ({
   method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
 
+const withKey = (init: RequestInit, key: string): RequestInit => ({
+  ...init, headers: { ...(init.headers as Record<string, string> | undefined), "Idempotency-Key": key },
+});
+
 export const api = {
   list: (q: { source?: string; employee?: string } = {}) => {
     const params = new URLSearchParams(Object.entries(q).filter(([, v]) => v) as [string, string][]);
@@ -28,16 +32,18 @@ export const api = {
     return { rows: body as ExpenseSummary[], total: Number(res.headers.get("X-Total-Count") ?? (body as unknown[]).length) };
   },
   get: (id: string) => request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}`),
-  create: (e: ExpenseInput) => request<ExpenseDetail>("/api/expenses", json("POST", e)),
+  // `key` is an Idempotency-Key: send the same one when retrying the same action.
+  create: (e: ExpenseInput, key: string) =>
+    request<ExpenseDetail>("/api/expenses", withKey(json("POST", e), key)),
   update: (id: string, e: ExpenseInput) => request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}`, json("PUT", e)),
-  upload: (file: File, employee: string) => {
+  upload: (file: File, employee: string, key: string) => {
     const fd = new FormData();
     fd.append("file", file);
     fd.append("employee", employee);
-    return request<ExpenseDetail[]>("/api/expenses/upload", { method: "POST", body: fd });
+    return request<ExpenseDetail[]>("/api/expenses/upload", withKey({ method: "POST", body: fd }, key));
   },
-  answer: (id: string, form: FormData) =>
-    request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}/answer`, { method: "POST", body: form }),
+  answer: (id: string, form: FormData, key: string) =>
+    request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}/answer`, withKey({ method: "POST", body: form }, key)),
   /** `expectedRevision` is the latest revision on screen; the server refuses (409) if it moved on. */
   override: (id: string, decision: "approve" | "reject", note: string, expectedRevision: number) =>
     request<ExpenseDetail>(`/api/expenses/${encodeURIComponent(id)}/override`,

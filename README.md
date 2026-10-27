@@ -66,7 +66,7 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
 - `eval.py`: **20/20** past decisions, **18/18** pending (gold labels in `data/expected_pending.json`),
   **99/100** on the synthetic failure-mode set (`data/mock_cases.json`, `--suite mock`),
   zero false approves (a hard assertion).
-- `pytest` (148, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
+- `pytest` (153, offline): policy boundaries, parsers, guard bands, attacks, portal HTTP round-trips,
   concurrency, outbox retry/ordering/claims, async jobs, and the races found in code review.
 
 ## POSTed decision
@@ -74,7 +74,9 @@ The LLMs never output the decision. Prompts live in `app/prompts/`.
 category_mapped_from, client, suspected_manipulation, revision, decision_key, source, decided_by,
 policy_version, prompt_version, decided_at}`. Each re-decision (edit, answer, Finance override)
 is a new `revision`; downstream should keep the latest. A Finance override sends the
-`expected_revision` it saw and is refused (409) if the expense changed or is being re-checked.
+`expected_revision` it saw and is refused (409) if the expense changed or is being re-checked;
+reversing an approve/reject needs a note. Create, upload and answer accept an `Idempotency-Key`
+header: a retried request returns the first result instead of acting twice. Uploads are all or nothing.
 
 ## Storage (`app/store.py`, SQLite `expenses.db`)
 - `expenses`: current raw + normalised fields, follow-up answers, version, latest status.

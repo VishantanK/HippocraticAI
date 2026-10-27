@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import threading
 import uuid
 from contextlib import asynccontextmanager
 
@@ -149,6 +150,30 @@ def _submit(raw, external_id=None):
     return _accept(store.next_portal_id(), raw, external_id)
 
 
+# Retried requests (double click, flaky network) must not create a second expense or answer.
+# The client sends an Idempotency-Key per user action; a repeat returns the first result's
+# expenses (as they are now) instead of doing it again. One lock keeps two copies of the same
+# request from both running; the guarded work is a few local writes, so contention is small.
+_idem_lock = threading.Lock()
+
+
+def _once(request, scope, work):
+    """Run `work` (returns a list of expense details) at most once per Idempotency-Key and scope."""
+    key = request.headers.get("Idempotency-Key")
+    if not key:
+        return work()
+    if len(key) > 128:
+        raise HTTPException(400, "Idempotency-Key is too long")
+    scoped = f"{scope}:{key}"
+    with _idem_lock:
+        ids = store.idempotent_ids(scoped)
+        if ids is not None:
+            return [store.expense_detail(i) for i in ids]
+        result = work()
+        store.remember_idempotent(scoped, [e["id"] for e in result])
+        return result
+
+
 @app.get("/api/stats")
 def get_stats():
     return store.stats()
@@ -281,8 +306,8 @@ def get_expense(expense_id: str):
 
 
 @app.post("/api/expenses", status_code=202)
-def create_expense(body: ExpenseIn):
-    return _submit(body.model_dump())
+def create_expense(body: ExpenseIn, request: Request):
+    return _once(request, "create", lambda: [_submit(body.model_dump())])[0]
 
 
 @app.put("/api/expenses/{expense_id}", status_code=202)
@@ -308,7 +333,7 @@ def _parse_upload(name, content):
 
 
 @app.post("/api/expenses/upload", status_code=202)
-def upload_expenses(file: UploadFile = File(...), employee: str = Form("")):
+def upload_expenses(request: Request, file: UploadFile = File(...), employee: str = Form("")):
     content = file.file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "file too large")
@@ -318,20 +343,27 @@ def upload_expenses(file: UploadFile = File(...), employee: str = Form("")):
         raise HTTPException(400, f"could not parse file: {e}")
     if len(rows) > MAX_BATCH:
         raise HTTPException(413, f"at most {MAX_BATCH} expenses per upload")
-    results = []
+    bad = [str(i + 1) for i, row in enumerate(rows) if not isinstance(row, dict)]
+    if bad:  # all or nothing: a half-imported file is worse than a clear error
+        raise HTTPException(400, f"row {', '.join(bad[:10])} {'is' if len(bad) == 1 else 'are'} not an expense object; nothing was imported")
     for row in rows:
-        if not isinstance(row, dict):
-            continue
         if employee.strip() and not row.get("employee"):
             row["employee"] = employee.strip()  # CSVs usually don't name the submitter
-        ext = str(row.get("id"))[:40] if row.get("id") else None
-        results.append(_submit(row, external_id=ext))
-    return results
+
+    def work():
+        ids = store.add_portal_expenses(
+            [(_raw(row), str(row.get("id"))[:40] if row.get("id") else None) for row in rows])
+        for expense_id in ids:
+            jobs.enqueue(expense_id)
+        return [store.expense_detail(i) for i in ids]
+
+    return _once(request, "upload", work)
 
 
 @app.post("/api/expenses/{expense_id}/answer", status_code=202)
 def answer_followup(
     expense_id: str,
+    request: Request,
     text: str = Form(""),
     approval_code: str = Form(""),
     category: str = Form(""),
@@ -339,9 +371,14 @@ def answer_followup(
     merchant: str = Form(""),
     receipt_file: UploadFile | None = File(None),
 ):
-    e = store.expense_detail(expense_id)
-    if not e:
+    if not store.get_expense(expense_id):
         raise HTTPException(404, "not found")
+    return _once(request, f"answer:{expense_id}", lambda: [_answer(
+        expense_id, text, approval_code, category, amount, merchant, receipt_file)])[0]
+
+
+def _answer(expense_id, text, approval_code, category, amount, merchant, receipt_file):
+    e = store.expense_detail(expense_id)
     if not any(f["status"] == "open" for f in e["followups"]):
         raise HTTPException(409, "no open question for this expense")
     fields = {"approval_code": approval_code.strip() or None, "category": category.strip() or None,
@@ -370,6 +407,9 @@ class OverrideIn(BaseModel):
 
 @app.post("/api/expenses/{expense_id}/override")
 def override(expense_id: str, body: OverrideIn):
+    latest = store.latest_decision(expense_id)
+    if not body.note.strip() and latest and latest["decision"] in ("approve", "reject") and body.decision != latest["decision"]:
+        raise HTTPException(400, "a note is required to reverse a decision (it goes on the record)")
     try:
         pipeline.human_override(expense_id, body.decision, body.note, expected_revision=body.expected_revision)
     except KeyError:

@@ -28,6 +28,7 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | P19 | A Finance decision is final for that version: queued automatic re-checks don't replace it, and an edit made after review can't auto-approve (it's flagged `edited_after_review`) | Inferred | review finding |
 | P20 | If a decision job crashes, the expense is flagged `check_failed` (stored and POSTed) | Inferred | fail closed |
 | P21 | A Finance override applies only to the revision the reviewer saw: if the expense was re-decided since, or is being re-checked, it is refused (409) and the page reloads | Inferred | robustness review (stale approve) |
+| P22 | Reversing an automatic approve or reject needs a note from Finance (400 without one); deciding a flag doesn't | Inferred | slice 7; audit trail |
 | P21 | An expense dated more than **6 calendar months** before today is flagged `stale_date` (late claim or a year typo); a reject stays a reject | Confirmed | user |
 | P22 | A placeholder merchant (no letters/digits, or N/A, none, unknown, TBD, misc, various...) counts as `missing_merchant` | Confirmed | user chose "Flag both" |
 | P23 | A blank employee is flagged `missing_employee` (duplicate and split checks can't run without one) | Confirmed | user chose "Flag both" |
@@ -68,3 +69,6 @@ a new assumption is made, and move items to Confirmed when the customer answers.
 | A9 | CSV export has the same filters as the list but every page, with the latest decision per expense (not the full history). String cells starting with = + - @ tab or CR are prefixed with ' so a spreadsheet won't run them | Inferred | slice 4; memos are untrusted |
 | A10 | "Retry now" on a dead delivery makes one immediate attempt (back to dead if it fails); only the latest revision can be retried. Old revisions that failed don't count as undelivered once a newer one exists | Inferred | slice 5; downstream keeps the latest (A5) |
 | A11 | Live updates are a hint, not the source of truth: after an SSE reconnect or when a tab becomes visible, pages refetch; a client more than 500 events behind is disconnected (it reconnects and refetches) | Inferred | slice 6 |
+| A12 | Create, upload and answer are idempotent per `Idempotency-Key` (one key per user action, scoped to the endpoint, kept indefinitely); a request without a key behaves as before | Inferred | slice 7 |
+| A13 | An upload with any row that isn't an expense object is refused whole (400, nothing imported); content problems are still judged per expense by the pipeline | Inferred | slice 7 |
+| A14 | Unsent form input (new expense, edit, follow-up reply) is kept as a draft for that browser tab and restored on return; closing the tab with unsent input asks first | Inferred | slice 7 |

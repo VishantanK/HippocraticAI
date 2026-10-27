@@ -145,15 +145,26 @@ function Checks({ e }: { e: ExpenseDetail }) {
 
 function Decide({ e, onDone }: { e: ExpenseDetail; onDone: () => void }) {
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+  const [noteError, setNoteError] = useState(false);
   const toast = useToast();
   if (e.status === "checking") {
     return <section className="rounded-lg border border-line bg-panel p-5 text-sm text-muted">Being checked. You can decide once it finishes.</section>;
   }
   const isFlag = e.status === "flag" || e.status === "error";
+  const amount = amountOf(e.raw, e.decisions.at(-1)?.payload) || "this expense";
+  // Reversing an approve or a reject goes on the record with a reason (the server enforces this too).
+  const noteRequired = !isFlag;
+
+  function ask(d: "approve" | "reject") {
+    if (noteRequired && !note.trim()) { setNoteError(true); return; }
+    setNoteError(false);
+    setConfirming(d);
+  }
 
   async function decide(d: "approve" | "reject") {
-    setBusy(d);
+    setBusy(true);
     try {
       await api.override(e.id, d, note.trim(), e.decisions.at(-1)?.revision ?? 0);
       toast(d === "approve" ? "Approved and sent to payments." : "Rejected and sent to payments.");
@@ -168,7 +179,8 @@ function Decide({ e, onDone }: { e: ExpenseDetail; onDone: () => void }) {
         toast((err as Error).message, "error");
       }
     } finally {
-      setBusy(null);
+      setBusy(false);
+      setConfirming(null);
     }
   }
 
@@ -178,12 +190,31 @@ function Decide({ e, onDone }: { e: ExpenseDetail; onDone: () => void }) {
       <p className="mt-1 text-sm text-ink-2">
         {isFlag ? "This one needs a person. Your decision is final for this version and is sent to payments." : "Overrides the current decision and is sent to payments."}
       </p>
-      <label htmlFor="note" className="field-label mt-4">Note for the record</label>
-      <textarea id="note" rows={2} className="field" placeholder="Why you decided this" value={note} onChange={(ev) => setNote(ev.target.value)} />
-      <div className="mt-3 flex flex-wrap gap-2">
-        {(isFlag || e.status === "reject") && <button className="btn-approve" disabled={!!busy} onClick={() => decide("approve")}>{busy === "approve" ? "Approving…" : "Approve"}</button>}
-        {(isFlag || e.status === "approve") && <button className="btn-reject" disabled={!!busy} onClick={() => decide("reject")}>{busy === "reject" ? "Rejecting…" : "Reject"}</button>}
-      </div>
+      <label htmlFor="note" className="field-label mt-4">Note for the record{noteRequired ? " (required)" : ""}</label>
+      <textarea id="note" rows={2} className="field" placeholder="Why you decided this" value={note}
+        aria-invalid={noteError} aria-describedby={noteError ? "note-error" : undefined}
+        onChange={(ev) => { setNote(ev.target.value); if (ev.target.value.trim()) setNoteError(false); }} />
+      {noteError && <p id="note-error" className="mt-1 text-sm text-reject">Say why you're reversing the automatic decision.</p>}
+
+      {confirming ? (
+        <div className="mt-3 rounded border border-line bg-panel p-3 text-sm" role="alertdialog" aria-labelledby="confirm-title">
+          <p id="confirm-title" className="font-semibold">
+            {confirming === "approve" ? "Approve" : "Reject"} {amount} for {e.employee ?? "this employee"}?
+          </p>
+          <p className="mt-0.5 text-ink-2">It's sent to payments straight away.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button autoFocus className={confirming === "approve" ? "btn-approve" : "btn-reject"} disabled={busy} onClick={() => decide(confirming)}>
+              {busy ? "Sending…" : `Yes, ${confirming}`}
+            </button>
+            <button className="btn-quiet" disabled={busy} onClick={() => setConfirming(null)}>Back</button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(isFlag || e.status === "reject") && <button className="btn-approve" onClick={() => ask("approve")}>Approve</button>}
+          {(isFlag || e.status === "approve") && <button className="btn-reject" onClick={() => ask("reject")}>Reject</button>}
+        </div>
+      )}
     </section>
   );
 }
